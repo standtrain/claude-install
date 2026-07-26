@@ -1,0 +1,35 @@
+# Nginx 示例配置（HTTPS 版）
+# 证书路径自行替换；建议用 certbot 或 acme.sh 申请 Let's Encrypt
+
+server {
+    listen 443 ssl http2;
+    server_name YOUR-DOMAIN.example;
+
+    ssl_certificate     /etc/ssl/YOUR-DOMAIN/fullchain.pem;
+    ssl_certificate_key /etc/ssl/YOUR-DOMAIN/privkey.pem;
+
+    root /var/www/claude-installer;
+    # 仅发布四个安装脚本，并只允许 GET/HEAD。
+    location ~ ^/(?:cc-custom|ccswitch)\.(?:ps1|sh)$ {
+        limit_except GET {
+            deny all;
+        }
+        try_files $uri =404;
+        default_type text/plain;
+        charset utf-8;
+        add_header Content-Type "text/plain; charset=utf-8" always;
+        add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+        add_header X-Content-Type-Options "nosniff" always;
+    }
+
+    location / {
+        return 404;
+    }
+}
+
+# HTTP 强跳 HTTPS
+server {
+    listen 80;
+    server_name YOUR-DOMAIN.example;
+    return 301 https://$host$request_uri;
+}

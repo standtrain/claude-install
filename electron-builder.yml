@@ -1,0 +1,34 @@
+appId: com.standtrain.claudecli.installer
+productName: Claude CLI 便携安装器
+copyright: Copyright (c) 2026 standtrain
+directories:
+  output: dist
+  buildResources: build
+files:
+  - src/**/*
+  - deploy/cc-custom.ps1
+  - package.json
+asar: true
+compression: normal
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
+  requestedExecutionLevel: requireAdministrator
+  artifactName: ${productName}-${version}-${arch}.${ext}
+nsis:
+  oneClick: false
+  perMachine: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  installerLanguages:
+    - zh_CN
+  language: '2052'
+portable:
+  artifactName: ClaudeCLIInstaller-Portable-${version}.exe
+  requestExecutionLevel: admin

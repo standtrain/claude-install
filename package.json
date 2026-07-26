@@ -1,0 +1,30 @@
+{
+  "name": "claude-cli-portable-installer",
+  "version": "0.3.4",
+  "description": "Claude CLI 便携式安装器：一键完成 Git Bash、Claude CLI、.claude.json、系统 PATH 配置",
+  "private": true,
+  "main": "src/main/main.js",
+  "author": "站着跑的火车 standtrain",
+  "license": "MIT",
+  "engines": {
+    "node": "11.9.x",
+    "npm": "6.x"
+  },
+  "scripts": {
+    "start": "electron .",
+    "start:linux": "electron linux-installer",
+    "check": "node scripts/check.js",
+    "test": "node tests/run.js",
+    "dist": "node scripts/build.js win",
+    "dist:portable": "node scripts/build.js win portable",
+    "dist:nsis": "node scripts/build.js win nsis",
+    "dist:linux": "node scripts/build.js linux",
+    "dist:appimage": "node scripts/build.js linux AppImage",
+    "dist:deb": "node scripts/build.js linux deb",
+    "dist:rpm": "node scripts/build.js linux rpm"
+  },
+  "devDependencies": {
+    "electron": "21.4.4",
+    "electron-builder": "22.10.5"
+  }
+}

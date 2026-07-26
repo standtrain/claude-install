@@ -1,0 +1,38 @@
+appId: com.standtrain.claudecli.installer.linux
+productName: Claude CLI 安装器
+copyright: Copyright (c) 2026 standtrain
+directories:
+  output: dist
+  buildResources: build
+files:
+  - src/**/*
+  - package.json
+extraResources:
+  - from: ../deploy/cc-custom.sh
+    to: deploy/cc-custom.sh
+  - from: ../deploy/ccswitch.sh
+    to: deploy/ccswitch.sh
+asar: true
+compression: normal
+# 应用无生产依赖；依赖统一由根 package-lock 管理，避免构建时改写子项目。
+npmRebuild: false
+linux:
+  target:
+    - target: AppImage
+      arch:
+        - x64
+        - arm64
+    - target: deb
+      arch:
+        - x64
+        - arm64
+    - target: rpm
+      arch:
+        - x64
+        - arm64
+  category: Development
+  maintainer: standtrain
+  executableName: claude-cli-installer
+  artifactName: ClaudeCLIInstaller-Linux-${version}-${arch}.${ext}
+  synopsis: Claude CLI 一键安装器
+  description: 一键完成 Git、Claude CLI、.claude.json 配置、系统 PATH 写入

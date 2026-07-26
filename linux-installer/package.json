@@ -1,0 +1,24 @@
+{
+  "name": "claude-cli-linux-installer",
+  "version": "0.3.4",
+  "description": "Claude CLI Linux 安装器：一键完成 Git、Claude CLI、.claude.json、系统 PATH 配置",
+  "private": true,
+  "main": "src/main/main.js",
+  "author": "站着跑的火车 standtrain",
+  "license": "MIT",
+  "engines": {
+    "node": "11.9.x",
+    "npm": "6.x"
+  },
+  "scripts": {
+    "start": "electron .",
+    "dist": "node ../scripts/build.js linux",
+    "dist:appimage": "node ../scripts/build.js linux AppImage",
+    "dist:deb": "node ../scripts/build.js linux deb",
+    "dist:rpm": "node ../scripts/build.js linux rpm"
+  },
+  "devDependencies": {
+    "electron": "21.4.4",
+    "electron-builder": "22.10.5"
+  }
+}

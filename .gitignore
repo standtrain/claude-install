@@ -1,0 +1,29 @@
+# 依赖与构建产物
+node_modules/
+dist/
+out/
+release/
+target/
+coverage/
+*.exe
+*.AppImage
+*.deb
+*.rpm
+linux-installer/package-lock.json
+
+# 敏感与本地
+.env
+.env.*
+deploy/*.local.*
+*.log
+
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+
+# 忽略克隆的官方仓库参考（脚本已内化到 deploy/）
+claude-code-install-scripts-main/

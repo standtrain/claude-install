@@ -1,0 +1,27 @@
+# 域名替换成你自己的，Caddy 会自动申请并续期 HTTPS 证书
+YOUR-DOMAIN.example {
+    root * /var/www/claude-installer
+
+    # 仅发布四个安装脚本，拒绝暴露目录中的其他文件。
+    @installer_scripts {
+        method GET HEAD
+        path /cc-custom.ps1 /cc-custom.sh /ccswitch.ps1 /ccswitch.sh
+    }
+    handle @installer_scripts {
+        header {
+            Content-Type "text/plain; charset=utf-8"
+            Cache-Control "no-cache, no-store, must-revalidate"
+            X-Content-Type-Options "nosniff"
+        }
+        file_server
+    }
+    handle {
+        respond 404
+    }
+
+    # 访问日志（便于排查）
+    log {
+        output file /var/log/caddy/claude-installer.log
+        format console
+    }
+}

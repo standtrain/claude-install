@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:;" />
+  <title>Claude CLI 便携安装器</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- 自定义标题栏 -->
+    <header class="titlebar">
+      <div class="titlebar-drag">
+        <span class="brand">
+          <span class="brand-dot"></span>
+          Claude CLI 便携安装器
+        </span>
+      </div>
+      <div class="titlebar-buttons">
+        <button class="tb-btn" id="btn-about" title="关于">i</button>
+        <button class="tb-btn" id="btn-min" title="最小化">–</button>
+        <button class="tb-btn tb-close" id="btn-close" title="关闭">×</button>
+      </div>
+    </header>
+
+    <main class="main">
+      <!-- 左侧步骤条 -->
+      <aside class="stepper">
+        <div class="step" data-step="detect">
+          <span class="step-num">1</span>
+          <span class="step-label">环境探测</span>
+          <span class="step-badge"></span>
+        </div>
+        <div class="step" data-step="git">
+          <span class="step-num">2</span>
+          <span class="step-label">Git Bash</span>
+          <span class="step-badge"></span>
+        </div>
+        <div class="step" data-step="claude">
+          <span class="step-num">3</span>
+          <span class="step-label">Claude CLI</span>
+          <span class="step-badge"></span>
+        </div>
+        <div class="step" data-step="config">
+          <span class="step-num">4</span>
+          <span class="step-label">写入配置</span>
+          <span class="step-badge"></span>
+        </div>
+        <div class="step" data-step="path">
+          <span class="step-num">5</span>
+          <span class="step-label">系统 PATH</span>
+          <span class="step-badge"></span>
+        </div>
+        <div class="step" data-step="done">
+          <span class="step-num">✓</span>
+          <span class="step-label">完成</span>
+          <span class="step-badge"></span>
+        </div>
+      </aside>
+
+      <!-- 右侧主内容 -->
+      <section class="content">
+        <!-- 顶部：探测卡片 & 选项 -->
+        <div class="card options-card">
+          <div class="card-header">
+            <h3>安装选项</h3>
+            <button id="btn-detect" class="btn btn-ghost">重新探测</button>
+          </div>
+          <div class="options">
+            <label class="switch-row">
+              <span>安装 Git Bash</span>
+              <label class="switch">
+                <input type="checkbox" id="opt-git" checked />
+                <span class="slider"></span>
+              </label>
+              <span class="hint" id="opt-git-hint">默认安装；已装会自动跳过</span>
+            </label>
+
+          </div>
+        </div>
+
+        <!-- 进度卡片 -->
+        <div class="card progress-card">
+          <div class="progress-head">
+            <span class="progress-title" id="progress-title">准备就绪</span>
+            <span class="progress-percent" id="progress-percent">0%</span>
+          </div>
+          <div class="progress-bar">
+            <div class="progress-fill" id="progress-fill" style="width:0%"></div>
+          </div>
+          <div class="progress-detail" id="progress-detail">点击"开始安装"启动流程</div>
+        </div>
+
+        <!-- 日志 -->
+        <div class="card log-card">
+          <div class="log-head">
+            <h3>实时日志</h3>
+            <div class="log-actions">
+              <button id="btn-copy-log" class="btn btn-ghost">复制</button>
+              <button id="btn-clear-log" class="btn btn-ghost">清空</button>
+              <button id="btn-open-log" class="btn btn-ghost">日志文件</button>
+            </div>
+          </div>
+          <div class="log-body" id="log"></div>
+        </div>
+
+        <!-- 底部操作栏 -->
+        <div class="actions">
+          <button id="btn-start" class="btn btn-primary">开始安装</button>
+          <button id="btn-cancel" class="btn btn-warn hidden">取消</button>
+          <button id="btn-ccswitch-only" class="btn btn-secondary">仅安装 CC Switch</button>
+          <button id="btn-ccswitch" class="btn btn-secondary hidden">加装 CC Switch</button>
+          <button id="btn-verify" class="btn btn-secondary hidden">验证安装</button>
+        </div>
+      </section>
+    </main>
+  </div>
+  <!-- 关于弹层 -->
+  <div class="modal-mask hidden" id="about-mask">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2>关于</h2>
+        <button class="tb-btn" id="btn-about-close" title="关闭">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="about-brand">
+          <span class="brand-dot"></span>
+          <div>
+            <div class="about-name">Claude CLI 便携安装器</div>
+            <div class="about-sub">Windows · 一键部署 Claude Code</div>
+          </div>
+        </div>
+
+        <dl class="about-meta">
+          <dt>版本</dt>
+          <dd id="about-version">—</dd>
+          <dt>发布时间</dt>
+          <dd id="about-build-time">—</dd>
+          <dt>作者</dt>
+          <dd>站着跑的火车 / standtrain</dd>
+          <dt>License</dt>
+          <dd>MIT</dd>
+        </dl>
+
+        <div class="about-section">
+          <div class="about-title">主要功能</div>
+          <ul class="about-list">
+            <li>静默安装 Git Bash（官方 + standtrain 备用镜像自动测速）</li>
+            <li>安装包内置 Claude 安装脚本并在执行前校验固定 SHA256</li>
+            <li>下载文件必须通过大小、格式与 SHA256 校验</li>
+            <li>写入 <code>.claude.json</code> 的 <code>hasCompletedOnboarding</code></li>
+            <li>安装位置搬迁到 <code>%ProgramData%\claude</code>、追加系统 PATH</li>
+            <li>可选加装 <code>CC Switch</code> 供应商切换 GUI</li>
+          </ul>
+        </div>
+
+        <div class="about-section">
+          <div class="about-title">安装来源</div>
+          <ul class="about-list">
+            <li>Claude Code 发布文件 · <b>Anthropic</b> 官方存储</li>
+            <li>Git for Windows · 官方 Release 与固定校验值</li>
+            <li>CC Switch · 官方 GitHub Release 与固定校验值</li>
+          </ul>
+        </div>
+
+        <div class="about-footer">
+          <span>如有问题欢迎反馈</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
