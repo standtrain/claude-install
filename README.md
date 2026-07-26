@@ -101,7 +101,7 @@ Claude CLI 的 Linux 脚本使用方法相同，只需将 URL 改为 `https://cl
 - Windows Git 固定为当前已验证的 2.55.0.windows.3，并在官方、清华 TUNA、阿里系 npmmirror 与华为云镜像间自动测速。
 - Git、Claude CLI 和 CC Switch 安装包按已知文件大小与 SHA256 校验，Linux 二进制还会检查 ELF 文件头。
 - 图形安装器只执行安装包内置且 SHA256 固定的部署脚本，不从远程选择脚本源。
-- CC Switch 固定为经过离线审查的 v3.18.0 元数据；镜像只承担传输，文件仍须匹配固定大小和 SHA256。
+- CC Switch 固定为经过离线审查的 v3.18.0 元数据，并在 GitHub、ghproxy.net、gh-proxy.com 与 ghfast.top 间回退；镜像只承担传输，文件仍须匹配固定大小和 SHA256。
 - Linux Claude CLI 安装到 `/opt/claude`，通过 `/usr/local/bin/claude` 提供全局命令；CC Switch 安装到 `/opt/cc-switch`，通过 `/usr/local/bin/cc-switch` 提供命令。
 - Windows 系统级安装目录为 `%ProgramData%\claude`，PATH 变更写入系统环境变量。
 

@@ -10,7 +10,7 @@ module.exports = {
   INSTALL_SCRIPT: {
     name: '安装包内置 Windows 脚本',
     relativePath: 'deploy/cc-custom.ps1',
-    sha256: '08ff0391180d4c8366e1908dcb9c65820fcea175eead9142164d3f0b6201a72c',
+    sha256: '39af7c26fa910d393652f95dae08f57e7585d5634c85cb6990ca3c3b56b6127f',
   },
   GIT_MIRRORS: [
     {
@@ -53,8 +53,9 @@ module.exports = {
     'registry.npmmirror.com',
     'cdn.npmmirror.com',
     'mirrors.huaweicloud.com',
-    'ghproxy.com',
-    'mirror.ghproxy.com',
+    'ghproxy.net',
+    'gh-proxy.com',
+    'ghfast.top',
   ],
 
   INSTALL_ROOT: 'C:\\ProgramData\\claude',
@@ -72,8 +73,9 @@ module.exports = {
   CCSWITCH: {
     // GitHub 镜像加速代理（自动派生：代理域名 + 原始 GitHub URL）
     ghMirrorProxies: [
-      'https://ghproxy.com/',
-      'https://mirror.ghproxy.com/',
+      { name: 'ghproxy.net', url: 'https://ghproxy.net/' },
+      { name: 'gh-proxy.com', url: 'https://gh-proxy.com/' },
+      { name: 'ghfast.top', url: 'https://ghfast.top/' },
     ],
     // 只接受经过离线审查的固定版本、大小与 SHA256。
     pinned: {

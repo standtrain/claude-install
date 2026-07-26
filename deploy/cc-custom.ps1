@@ -736,7 +736,9 @@ function Assert-ExactFileSystemAcl {
 
     $expected = @{}
     $fullControl = [System.Security.AccessControl.FileSystemRights]::FullControl
-    $readExecute = [System.Security.AccessControl.FileSystemRights]::ReadAndExecute
+    # .NET 会为允许型文件系统 ACE 自动补充 Synchronize；按落盘后的规范化掩码校验。
+    $readExecute = [System.Security.AccessControl.FileSystemRights]::ReadAndExecute -bor `
+        [System.Security.AccessControl.FileSystemRights]::Synchronize
     $expected[(Get-ExpectedAclSignature -Sid $ADMINISTRATORS_SID -Rights $fullControl -InheritanceFlags $inheritanceFlags)] = 1
     $expected[(Get-ExpectedAclSignature -Sid $SYSTEM_SID -Rights $fullControl -InheritanceFlags $inheritanceFlags)] = 1
     if ($AllowUsersReadExecute) {

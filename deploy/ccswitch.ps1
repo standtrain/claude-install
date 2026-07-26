@@ -3,7 +3,7 @@
 # CC Switch installer for Windows.
 # Security checkpoints:
 # - GitHub metadata, architecture, asset name, URL, size, and SHA256 are validated.
-# - Only official GitHub release hosts are accepted; redirects are checked explicitly.
+# - Only exact official or configured proxy release URLs are accepted; redirects are checked explicitly.
 # - The MSI is stored only in a protected ProgramData directory with no reparse points.
 # - The file is created once, hashed, identity-checked, and locked against replacement before msiexec.
 
@@ -37,6 +37,11 @@ $MaximumRedirects = 5
 $DownloadAttempts = 3
 $PrivateDirectoryPrefix = 'ccswitch-'
 $PrivateMsiName = 'CC-Switch.msi'
+$MirrorPrefixes = @(
+    'https://ghproxy.net/',
+    'https://gh-proxy.com/',
+    'https://ghfast.top/'
+)
 
 function Get-NativeArchitecture {
     $architectureHints = @(
@@ -113,6 +118,38 @@ function Test-TrustedRedirectUri {
         'objects.githubusercontent.com'
     )
     return $allowedHosts -icontains $Uri.DnsSafeHost
+}
+
+function Assert-AssetTransportUrl {
+    param(
+        [Parameter(Mandatory = $true)][string]$Url,
+        [Parameter(Mandatory = $true)][string]$Tag,
+        [Parameter(Mandatory = $true)][string]$AssetName
+    )
+
+    $officialUrl = "https://github.com/farion1231/cc-switch/releases/download/$Tag/$AssetName"
+    [void](Assert-GitHubAssetUrl -Url $officialUrl -Tag $Tag -AssetName $AssetName)
+    if ($Url -ceq $officialUrl) {
+        return [Uri]$officialUrl
+    }
+
+    foreach ($prefix in $MirrorPrefixes) {
+        if ($Url -ceq "$prefix$officialUrl") {
+            [Uri]$mirrorUri = $null
+            if (
+                [Uri]::TryCreate($Url, [UriKind]::Absolute, [ref]$mirrorUri) -and
+                $mirrorUri.Scheme -ceq 'https' -and
+                $mirrorUri.Port -eq 443 -and
+                $mirrorUri.UserInfo.Length -eq 0 -and
+                $mirrorUri.Query.Length -eq 0 -and
+                $mirrorUri.Fragment.Length -eq 0
+            ) {
+                return $mirrorUri
+            }
+        }
+    }
+
+    throw 'INVALID_ASSET_URL'
 }
 
 function New-PinnedSource {
@@ -213,6 +250,23 @@ function Get-LatestGitHubSource {
     }
 }
 
+function New-TransportSources {
+    param([Parameter(Mandatory = $true)][psobject]$Source)
+
+    $sources = @($Source)
+    foreach ($prefix in $MirrorPrefixes) {
+        $sources += [pscustomobject]@{
+            Version = $Source.Version
+            AssetName = $Source.AssetName
+            Url = "$prefix$($Source.Url)"
+            ExpectedSize = $Source.ExpectedSize
+            ExpectedSha256 = $Source.ExpectedSha256
+            IsPinned = $Source.IsPinned
+        }
+    }
+    return $sources
+}
+
 function Invoke-HttpDownloadOnce {
     param(
         [Parameter(Mandatory = $true)][psobject]$Source,
@@ -225,7 +279,7 @@ function Invoke-HttpDownloadOnce {
         throw 'INVALID_ASSET_SIZE'
     }
 
-    [Uri]$currentUri = Assert-GitHubAssetUrl `
+    [Uri]$currentUri = Assert-AssetTransportUrl `
         -Url ([string]$Source.Url) `
         -Tag ([string]$Source.Version) `
         -AssetName ([string]$Source.AssetName)
@@ -780,11 +834,21 @@ try {
     $temporaryDirectory = New-PrivateInstallerDirectory
     $msiPath = [System.IO.Path]::Combine($temporaryDirectory, $PrivateMsiName)
 
-    Write-Output '[INFO] 正在下载并校验安装包大小与 SHA256。'
-    $msiFingerprint = Invoke-VerifiedDownload `
-        -Source $source `
-        -Destination $msiPath `
-        -PrivateDirectory $temporaryDirectory
+    Write-Output '[INFO] 正在从官方与镜像源下载并校验安装包大小与 SHA256。'
+    $transportSources = @(New-TransportSources -Source $source)
+    $msiFingerprint = $null
+    for ($sourceIndex = 0; $sourceIndex -lt $transportSources.Count; $sourceIndex++) {
+        $candidate = $transportSources[$sourceIndex]
+        Write-Output "[INFO] 尝试下载源 $($sourceIndex + 1)/$($transportSources.Count)。"
+        $msiFingerprint = Invoke-VerifiedDownload `
+            -Source $candidate `
+            -Destination $msiPath `
+            -PrivateDirectory $temporaryDirectory
+        if ($null -ne $msiFingerprint) {
+            $source = $candidate
+            break
+        }
+    }
     if ($null -eq $msiFingerprint) {
         $failureCode = 'DOWNLOAD_FAILED'
         throw $failureCode
@@ -844,7 +908,7 @@ catch {
             Write-Error '[ERROR] 仅支持 Windows x64 或 ARM64。' -ErrorAction Continue
         }
         'DOWNLOAD_FAILED' {
-            Write-Error '[ERROR] 官方安装包下载失败，或大小/SHA256 校验未通过。' -ErrorAction Continue
+            Write-Error '[ERROR] 所有安装包来源均失败，或大小/SHA256 校验未通过。' -ErrorAction Continue
         }
         'MSIEXEC_NOT_FOUND' {
             Write-Error '[ERROR] Windows Installer 不可用。' -ErrorAction Continue

@@ -21,10 +21,12 @@ function addSourceWithProxies(target, seen, source) {
   };
   add(source);
   (env.CCSWITCH.ghMirrorProxies || []).forEach((proxy, index) => {
-    const url = `${proxy}${source.url}`;
+    if (!proxy || typeof proxy.name !== 'string' || proxy.name.length > 80
+        || typeof proxy.url !== 'string' || proxy.url.length > 256) return;
+    const url = `${proxy.url}${source.url}`;
     add(Object.assign({}, source, {
       id: `${source.id}-mirror-${index + 1}`,
-      name: `${source.name} 镜像 ${index + 1}`,
+      name: `${source.name} · ${proxy.name}`,
       url,
     }));
   });

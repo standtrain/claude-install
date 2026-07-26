@@ -109,13 +109,17 @@ is_allowed_transport_url() {
                 *) return 1 ;;
             esac
             ;;
-        ghproxy.com)
-            [ "$_url" = "https://ghproxy.com/$PINNED_X86_64_URL" ] \
-                || [ "$_url" = "https://ghproxy.com/$PINNED_ARM64_URL" ]
+        ghproxy.net)
+            [ "$_url" = "https://ghproxy.net/$PINNED_X86_64_URL" ] \
+                || [ "$_url" = "https://ghproxy.net/$PINNED_ARM64_URL" ]
             ;;
-        mirror.ghproxy.com)
-            [ "$_url" = "https://mirror.ghproxy.com/$PINNED_X86_64_URL" ] \
-                || [ "$_url" = "https://mirror.ghproxy.com/$PINNED_ARM64_URL" ]
+        gh-proxy.com)
+            [ "$_url" = "https://gh-proxy.com/$PINNED_X86_64_URL" ] \
+                || [ "$_url" = "https://gh-proxy.com/$PINNED_ARM64_URL" ]
+            ;;
+        ghfast.top)
+            [ "$_url" = "https://ghfast.top/$PINNED_X86_64_URL" ] \
+                || [ "$_url" = "https://ghfast.top/$PINNED_ARM64_URL" ]
             ;;
         *) return 1 ;;
     esac
@@ -373,11 +377,12 @@ SOURCE_INDEX=0
 DOWNLOADED=false
 for SOURCE_URL in \
     "$PINNED_URL" \
-    "https://ghproxy.com/$PINNED_URL" \
-    "https://mirror.ghproxy.com/$PINNED_URL"
+    "https://ghproxy.net/$PINNED_URL" \
+    "https://gh-proxy.com/$PINNED_URL" \
+    "https://ghfast.top/$PINNED_URL"
 do
     SOURCE_INDEX=$((SOURCE_INDEX + 1))
-    printf '[INFO] 尝试固定版本下载源 %s/3\n' "$SOURCE_INDEX"
+    printf '[INFO] 尝试固定版本下载源 %s/4\n' "$SOURCE_INDEX"
     if ! download_file "$SOURCE_URL" "$DEST" "$PINNED_SIZE"; then
         continue
     fi

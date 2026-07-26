@@ -205,12 +205,16 @@ test('Windows privileged command and CC Switch pinning contracts', async () => {
   const switchInstallerPath = path.join(root, 'src', 'main', 'installer', 'ccswitch');
   const switchInstaller = require(switchInstallerPath);
   const sources = await switchInstaller.buildSources();
-  assert.strictEqual(sources.length, 3);
+  assert.strictEqual(sources.length, 4);
   sources.forEach((source) => {
     assert.strictEqual(source.version, switchEnv.pinned.version);
     assert.strictEqual(source.size, switchEnv.pinned.size);
     assert.strictEqual(source.sha256, switchEnv.pinned.sha256);
   });
+  assert.deepStrictEqual(
+    sources.slice(1).map((source) => new URL(source.url).hostname),
+    ['ghproxy.net', 'gh-proxy.com', 'ghfast.top'],
+  );
   const switchSource = fs.readFileSync(`${switchInstallerPath}.js`, 'utf8');
   assert(!/readJson|releases\/latest|githubApi/.test(switchSource));
   assert(/EXECUTABLES\.msiexec/.test(switchSource));
@@ -234,6 +238,11 @@ test('PowerShell web bootstrap contracts', () => {
     assert(firstNetworkOperation === -1 || invocation < firstNetworkOperation);
     assert(firstDirectoryMutation === -1 || invocation < firstDirectoryMutation);
   });
+
+  const claudeSource = fs.readFileSync(path.join(deployRoot, 'cc-custom.ps1'), 'utf8');
+  assert(/ReadAndExecute\s+-bor\s+`\s*\r?\n\s*\[System\.Security\.AccessControl\.FileSystemRights\]::Synchronize/.test(
+    claudeSource,
+  ));
 });
 
 test('Linux target user and verification contracts', async () => {
@@ -333,6 +342,7 @@ test('logger redaction contracts', () => {
 test('deploy bootstrap contracts', async () => {
   const deployDir = path.join(__dirname, '..', 'deploy');
   const switchScript = fs.readFileSync(path.join(deployDir, 'ccswitch.sh'), 'utf8');
+  const switchPowerShell = fs.readFileSync(path.join(deployDir, 'ccswitch.ps1'), 'utf8');
   const claudeScript = fs.readFileSync(path.join(deployDir, 'cc-custom.sh'), 'utf8');
   [switchScript, claudeScript].forEach((script) => {
     assert(/if command -v curl/.test(script));
@@ -353,6 +363,12 @@ test('deploy bootstrap contracts', async () => {
   assert(/secure_system_directory/.test(claudeScript));
   assert(/--max-redirect=0/.test(claudeScript));
   assert(/SHA256 校验失败/.test(switchScript));
+  ['ghproxy.net', 'gh-proxy.com', 'ghfast.top'].forEach((host) => {
+    assert(switchScript.includes(host));
+    assert(switchPowerShell.includes(host));
+  });
+  assert(/function Assert-AssetTransportUrl/.test(switchPowerShell));
+  assert(/New-TransportSources/.test(switchPowerShell));
 });
 
 test('build metadata contracts', async () => {
