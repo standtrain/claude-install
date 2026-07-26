@@ -211,6 +211,15 @@ safe_gcs_url() {
     return 0
 }
 
+downloaded_file_within_limit() {
+    _checked_file="$1"
+    _checked_limit="$2"
+    [ -f "$_checked_file" ] && [ ! -L "$_checked_file" ] || return 1
+    _checked_size=$(wc -c < "$_checked_file" | tr -d '[:space:]') || return 1
+    printf '%s\n' "$_checked_size" | grep -Eq '^[0-9]+$' || return 1
+    [ "$_checked_size" -le "$_checked_limit" ]
+}
+
 download_file() {
     _url="$1"
     _output="$2"
@@ -219,6 +228,7 @@ download_file() {
     safe_gcs_url "$_url" || { echo "[ERROR] 下载 URL 不在允许范围" >&2; return 1; }
     printf '%s\n' "$_max_bytes" | grep -Eq '^[0-9]{1,10}$' || return 1
     [ "$_max_bytes" -gt 0 ] && [ "$_max_bytes" -le "$MAX_BINARY_BYTES" ] || return 1
+    _file_blocks=$(((_max_bytes + 511) / 512))
     _attempt=1
     while [ "$_attempt" -le 3 ]; do
         rm -f -- "$_output"
@@ -242,11 +252,23 @@ download_file() {
             fi
         else
             if [ "$_quiet" = "true" ]; then
-                wget --https-only --max-redirect=0 --timeout="$DOWNLOAD_TIMEOUT" --tries=2 \
-                    --max-filesize="$_max_bytes" -q -O "$_output" "$_url" && return 0
+                if (
+                    ulimit -c 0 || exit 1
+                    ulimit -f "$_file_blocks" || exit 1
+                    wget --https-only --max-redirect=0 --timeout="$DOWNLOAD_TIMEOUT" --tries=2 \
+                        -q -O "$_output" "$_url"
+                ); then
+                    downloaded_file_within_limit "$_output" "$_max_bytes" && return 0
+                fi
             else
-                wget --https-only --max-redirect=0 --timeout="$DOWNLOAD_TIMEOUT" --tries=2 \
-                    --max-filesize="$_max_bytes" -O "$_output" "$_url" && return 0
+                if (
+                    ulimit -c 0 || exit 1
+                    ulimit -f "$_file_blocks" || exit 1
+                    wget --https-only --max-redirect=0 --timeout="$DOWNLOAD_TIMEOUT" --tries=2 \
+                        -O "$_output" "$_url"
+                ); then
+                    downloaded_file_within_limit "$_output" "$_max_bytes" && return 0
+                fi
             fi
         fi
         echo "[WARN] 下载失败（第 $_attempt/3 次）" >&2

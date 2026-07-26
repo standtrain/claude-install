@@ -11,12 +11,12 @@ module.exports = {
   INSTALL_SCRIPT: {
     name: '安装包内置 Linux 脚本',
     relativePath: 'deploy/cc-custom.sh',
-    sha256: '0b90e639864df9ffe7082d27a9ff8b71f129f7192fbc58472db35b1a057712a0',
+    sha256: '433ddf293630c0300d8af6923db0cb08c214f054c3e2c5d3a8f2bca0b59d02ce',
   },
   CCSWITCH_SCRIPT: {
     name: '安装包内置 CC Switch 脚本',
     relativePath: 'deploy/ccswitch.sh',
-    sha256: '1dc2f7f0b02714ff369c1db7d8ae9f216aa25fe663d8cb0f37d85d547c098ef7',
+    sha256: '37eca300575c1f36a8184701d7540b258cae91cd366e5dec509cc02ba9c83cba',
   },
 
   // ── Git 包管理器方案（Linux 非必要，仅兜底） ──

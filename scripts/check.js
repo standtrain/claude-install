@@ -137,6 +137,9 @@ const shell = shellCandidates.find((candidate) => candidate && fs.existsSync(can
 if (shell) {
   run(shell, ['-n', path.join(root, 'deploy', 'cc-custom.sh')], 'cc-custom.sh 语法检查');
   run(shell, ['-n', path.join(root, 'deploy', 'ccswitch.sh')], 'ccswitch.sh 语法检查');
+  const wgetCompatibilityTest = path.join(root, 'tests', 'wget-compat.sh');
+  run(shell, ['-n', wgetCompatibilityTest], 'wget 兼容性测试语法检查');
+  run(shell, [wgetCompatibilityTest], 'wget 兼容性行为检查');
 } else {
   fail('未找到可用于 shell -n 的解释器');
 }

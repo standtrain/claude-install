@@ -144,7 +144,8 @@ download_with_curl() {
 
     rm -f -- "$_output" "$_effective_file"
     if ! (
-        ulimit -f "$_file_blocks"
+        ulimit -c 0 || exit 1
+        ulimit -f "$_file_blocks" || exit 1
         curl --fail --location --show-error --progress-bar \
             --proto '=https' --proto-redir '=https' --tlsv1.2 \
             --connect-timeout 15 --max-time "$DOWNLOAD_TIMEOUT" \
@@ -181,9 +182,24 @@ get_http_status() {
 get_redirect_location() {
     _headers="$1"
     _locations="$TMP_DIR/wget.locations"
-    sed -n 's/^[[:space:]]*[Ll][Oo][Cc][Aa][Tt][Ii][Oo][Nn]:[[:space:]]*//p' \
-        "$_headers" | tr -d '\r' > "$_locations"
-    [ "$(wc -l < "$_locations" | tr -d '[:space:]')" -eq 1 ] || return 1
+    awk '
+        {
+            line = $0
+            sub(/\r$/, "", line)
+            if (line !~ /^[[:space:]]*[Ll][Oo][Cc][Aa][Tt][Ii][Oo][Nn]:/) next
+            sub(/^[[:space:]]*[Ll][Oo][Cc][Aa][Tt][Ii][Oo][Nn]:[[:space:]]*/, "", line)
+            sub(/[[:space:]]+\[[Ff][Oo][Ll][Ll][Oo][Ww][Ii][Nn][Gg]\][[:space:]]*$/, "", line)
+            sub(/[[:space:]]+$/, "", line)
+            if (line != "" && !seen[line]++) {
+                location = line
+                count++
+            }
+        }
+        END {
+            if (count == 1) print location
+            else exit 1
+        }
+    ' "$_headers" > "$_locations" || return 1
     IFS= read -r REDIRECT_LOCATION < "$_locations" || return 1
     [ -n "$REDIRECT_LOCATION" ]
 }
@@ -205,11 +221,11 @@ download_with_wget() {
         rm -f -- "$_output" "$_headers"
         _wget_ok=false
         if (
-            ulimit -f "$_file_blocks"
+            ulimit -c 0 || exit 1
+            ulimit -f "$_file_blocks" || exit 1
             wget --https-only --server-response --max-redirect=0 \
                 --connect-timeout=15 --read-timeout="$DOWNLOAD_TIMEOUT" \
-                --tries=1 --max-filesize="$_max_bytes" \
-                --output-document="$_output" "$_url"
+                --tries=1 --output-document="$_output" "$_url"
         ) > /dev/null 2> "$_headers"; then
             _wget_ok=true
         fi

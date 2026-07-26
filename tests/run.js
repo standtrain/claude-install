@@ -370,13 +370,31 @@ test('deploy bootstrap contracts', async () => {
   assert(/url_effective/.test(switchScript));
   assert(/wget never follows redirects/.test(switchScript));
   assert(/get_redirect_location/.test(switchScript));
-  assert(/--max-filesize/.test(switchScript));
+  const switchCurl = switchScript.slice(
+    switchScript.indexOf('download_with_curl()'),
+    switchScript.indexOf('get_http_status()'),
+  );
+  const switchWget = switchScript.slice(
+    switchScript.indexOf('download_with_wget()'),
+    switchScript.indexOf('download_file()'),
+  );
+  assert(/--max-filesize/.test(switchCurl));
+  assert(!/--max-filesize/.test(switchWget));
+  assert(/ulimit -c 0/.test(switchWget));
+  assert(/ulimit -f/.test(switchWget));
+  assert(/within_size_limit/.test(switchWget));
+  assert(/!seen\[line\]\+\+/.test(switchScript));
   assert(/\[ -L "\$INSTALL_DIR" \]/.test(switchScript));
   assert(/mktemp "\$INSTALL_DIR\/\.cc-switch\.AppImage\.XXXXXX"/.test(switchScript));
   assert(/for managed_dir in/.test(claudeScript));
   assert(/PKEXEC_UID/.test(claudeScript));
   assert(/secure_system_directory/.test(claudeScript));
   assert(/--max-redirect=0/.test(claudeScript));
+  const claudeLogicalCommands = claudeScript.replace(/\\\r?\n[ \t]*/g, ' ');
+  assert(!/(?:^|\n)[ \t]*wget[^\n]*--max-filesize/m.test(claudeLogicalCommands));
+  assert(/downloaded_file_within_limit/.test(claudeScript));
+  assert(/ulimit -c 0/.test(claudeScript));
+  assert(/ulimit -f/.test(claudeScript));
   assert(/SHA256 校验失败/.test(switchScript));
   ['ghproxy.net', 'gh-proxy.com', 'ghfast.top'].forEach((host) => {
     assert(switchScript.includes(host));
