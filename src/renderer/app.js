@@ -15,7 +15,6 @@ const els = {
   btnCancel: $('#btn-cancel'),
   btnDetect: $('#btn-detect'),
   btnVerify: $('#btn-verify'),
-  btnCCSwitchOnly: $('#btn-ccswitch-only'),
   btnCCSwitch: $('#btn-ccswitch'),
   btnCopyLog: $('#btn-copy-log'),
   btnClearLog: $('#btn-clear-log'),
@@ -33,10 +32,7 @@ let mainInstallBusy = false;
 let ccSwitchBusy = false;
 let ccSwitchInstalled = false;
 
-const ccSwitchLabels = {
-  only: els.btnCCSwitchOnly.textContent,
-  afterInstall: els.btnCCSwitch.textContent,
-};
+const ccSwitchLabel = els.btnCCSwitch.textContent;
 
 function clearElement(element) {
   while (element.firstChild) element.removeChild(element.firstChild);
@@ -45,7 +41,6 @@ function clearElement(element) {
 function syncOperationButtons() {
   els.btnStart.disabled = mainInstallBusy || ccSwitchBusy;
   const disableCCSwitch = mainInstallBusy || ccSwitchBusy || ccSwitchInstalled;
-  els.btnCCSwitchOnly.disabled = disableCCSwitch;
   els.btnCCSwitch.disabled = disableCCSwitch;
 }
 
@@ -208,7 +203,6 @@ els.btnStart.addEventListener('click', async () => {
     await api.startInstall({ installGit: els.optGit.checked });
     els.btnCancel.classList.add('hidden');
     els.btnVerify.classList.remove('hidden');
-    els.btnCCSwitch.classList.remove('hidden');
     els.btnStart.textContent = '重新安装';
     appendLog({ level: 'ok', text: '全部步骤完成。若在自己的 CMD/PowerShell 中提示 “claude 不是内部或外部命令”，请重新打开终端或注销后重登再试。', ts: Date.now() });
   } catch (e) {
@@ -233,26 +227,21 @@ els.btnCancel.addEventListener('click', () => {
 async function runCCSwitchInstall() {
   if (ccSwitchBusy || ccSwitchInstalled || mainInstallBusy) return;
   ccSwitchBusy = true;
-  els.btnCCSwitchOnly.textContent = '安装中…';
   els.btnCCSwitch.textContent = '安装中…';
   syncOperationButtons();
   appendLog({ level: 'info', text: '开始安装 CC Switch…', ts: Date.now() });
   try {
     await api.installCCSwitch();
     ccSwitchInstalled = true;
-    els.btnCCSwitchOnly.textContent = '已安装 CC Switch ✓';
     els.btnCCSwitch.textContent = '已安装 CC Switch ✓';
     appendLog({ level: 'ok', text: 'CC Switch 安装完成！从开始菜单启动。', ts: Date.now() });
   } catch (e) {
     appendLog({ level: 'err', text: 'CC Switch 安装失败：' + (e && e.message || e), ts: Date.now() });
-    els.btnCCSwitchOnly.textContent = ccSwitchLabels.only + '（重试）';
-    els.btnCCSwitch.textContent = ccSwitchLabels.afterInstall + '（重试）';
+    els.btnCCSwitch.textContent = ccSwitchLabel + '（重试）';
   } finally {
     ccSwitchBusy = false;
     syncOperationButtons();
   }
 }
 
-// 两个入口共享同一个状态，避免重复点击或并发安装。
-els.btnCCSwitchOnly.addEventListener('click', runCCSwitchInstall);
 els.btnCCSwitch.addEventListener('click', runCCSwitchInstall);

@@ -245,6 +245,21 @@ test('PowerShell web bootstrap contracts', () => {
   ));
 });
 
+test('renderers expose one CC Switch action', () => {
+  const root = path.join(__dirname, '..');
+  ['src', 'linux-installer/src'].forEach((rendererRoot) => {
+    const renderer = path.join(root, rendererRoot, 'renderer');
+    const html = fs.readFileSync(path.join(renderer, 'index.html'), 'utf8');
+    const source = fs.readFileSync(path.join(renderer, 'app.js'), 'utf8');
+
+    assert.strictEqual((html.match(/id="btn-ccswitch"/g) || []).length, 1);
+    assert(!/btn-ccswitch-only/.test(html));
+    assert(!/btnCCSwitchOnly|ccSwitchLabels/.test(source));
+    assert(!/btnCCSwitch\.classList\.remove\(['"]hidden['"]\)/.test(source));
+    assert.strictEqual((source.match(/btnCCSwitch\.addEventListener\(['"]click['"]/g) || []).length, 1);
+  });
+});
+
 test('Linux target user and verification contracts', async () => {
   const installerRoot = path.join(__dirname, '..', 'linux-installer', 'src', 'main');
   const configWriter = require(path.join(installerRoot, 'installer', 'configWriter'));
