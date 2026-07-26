@@ -740,8 +740,8 @@ function Invoke-VerifiedDownload {
     }
 
     for ($attempt = 1; $attempt -le $DownloadAttempts; $attempt++) {
-        Remove-PrivateInstallerFile -PrivateDirectory $PrivateDirectory -Path $Destination
         try {
+            Remove-PrivateInstallerFile -PrivateDirectory $PrivateDirectory -Path $Destination
             Invoke-HttpDownloadOnce -Source $Source -Destination $Destination -PrivateDirectory $PrivateDirectory
             $fingerprint = Get-PrivateFileFingerprintWithRetry `
                 -PrivateDirectory $PrivateDirectory `
@@ -755,7 +755,12 @@ function Invoke-VerifiedDownload {
             return $fingerprint
         }
         catch {
-            Remove-PrivateInstallerFile -PrivateDirectory $PrivateDirectory -Path $Destination
+            try {
+                Remove-PrivateInstallerFile -PrivateDirectory $PrivateDirectory -Path $Destination
+            }
+            catch {
+                Write-Warning '[WARN] 当前下载尝试的临时文件未能清理，将在退出时再次清理。'
+            }
             if ($attempt -lt $DownloadAttempts) {
                 Write-Warning "[WARN] 下载或完整性校验失败，正在重试 ($attempt/$DownloadAttempts)。"
                 Start-Sleep -Seconds 2
@@ -840,13 +845,27 @@ try {
     for ($sourceIndex = 0; $sourceIndex -lt $transportSources.Count; $sourceIndex++) {
         $candidate = $transportSources[$sourceIndex]
         Write-Output "[INFO] 尝试下载源 $($sourceIndex + 1)/$($transportSources.Count)。"
-        $msiFingerprint = Invoke-VerifiedDownload `
-            -Source $candidate `
-            -Destination $msiPath `
-            -PrivateDirectory $temporaryDirectory
+        try {
+            $msiFingerprint = Invoke-VerifiedDownload `
+                -Source $candidate `
+                -Destination $msiPath `
+                -PrivateDirectory $temporaryDirectory
+        }
+        catch {
+            $msiFingerprint = $null
+            try {
+                Remove-PrivateInstallerFile -PrivateDirectory $temporaryDirectory -Path $msiPath
+            }
+            catch {
+                Write-Warning '[WARN] 当前下载源的临时文件未能清理，将在退出时再次清理。'
+            }
+        }
         if ($null -ne $msiFingerprint) {
             $source = $candidate
             break
+        }
+        if ($sourceIndex + 1 -lt $transportSources.Count) {
+            Write-Warning '[WARN] 当前下载源不可用，将尝试下一个来源。'
         }
     }
     if ($null -eq $msiFingerprint) {

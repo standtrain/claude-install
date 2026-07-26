@@ -384,6 +384,10 @@ test('deploy bootstrap contracts', async () => {
   });
   assert(/function Assert-AssetTransportUrl/.test(switchPowerShell));
   assert(/New-TransportSources/.test(switchPowerShell));
+  assert(/try\s*\{\s*\$msiFingerprint = Invoke-VerifiedDownload/.test(switchPowerShell));
+  assert(/catch\s*\{\s*\$msiFingerprint = \$null/.test(switchPowerShell));
+  assert(/\$sourceIndex \+ 1 -lt \$transportSources\.Count/.test(switchPowerShell));
+  assert(/当前下载源不可用，将尝试下一个来源/.test(switchPowerShell));
 });
 
 test('build metadata contracts', async () => {
