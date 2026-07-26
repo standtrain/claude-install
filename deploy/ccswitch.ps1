@@ -1,4 +1,4 @@
-﻿#requires -Version 5.1
+#Requires -Version 5.1
 
 # CC Switch installer for Windows.
 # Security checkpoints:
@@ -10,6 +10,21 @@
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+
+function Assert-Administrator {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    try {
+        $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+        if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+            throw '[ERROR] 需要管理员权限。请以管理员身份打开 PowerShell 后重新执行安装命令。'
+        }
+    }
+    finally {
+        $identity.Dispose()
+    }
+}
+
+Assert-Administrator
 
 $GitHubApiUrl = 'https://api.github.com/repos/farion1231/cc-switch/releases/latest'
 $PinnedVersion = 'v3.18.0'

@@ -70,9 +70,15 @@ jsFiles.forEach((file) => {
 
 const deployFiles = ['cc-custom.sh', 'ccswitch.sh', 'cc-custom.ps1', 'ccswitch.ps1'];
 deployFiles.forEach((name) => {
-  const source = fs.readFileSync(path.join(root, 'deploy', name), 'utf8');
+  const file = path.join(root, 'deploy', name);
+  const bytes = fs.readFileSync(file);
+  const source = bytes.toString('utf8');
   if (/http:\/\//i.test(source)) fail(`deploy/${name}: 禁止明文 HTTP 下载`);
   if (/PLACEHOLDER/i.test(source)) fail(`deploy/${name}: 存在占位配置`);
+  if (name.endsWith('.ps1') && bytes.length >= 3
+      && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    fail(`deploy/${name}: irm | iex 入口要求 UTF-8 无 BOM`);
+  }
 });
 
 const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
@@ -138,7 +144,7 @@ if (shell) {
 if (process.platform === 'win32') {
   const files = ['cc-custom.ps1', 'ccswitch.ps1'].map((name) => path.join(root, 'deploy', name));
   const quoted = files.map((file) => `'${file.replace(/'/g, "''")}'`).join(',');
-  const command = `$files=@(${quoted});$bad=$false;foreach($file in $files){$tokens=$null;$errors=$null;[void][Management.Automation.Language.Parser]::ParseFile($file,[ref]$tokens,[ref]$errors);if($errors.Count){$bad=$true;$errors|ForEach-Object{Write-Error $_.Message}}};if($bad){exit 1}`;
+  const command = `$files=@(${quoted});$utf8=New-Object Text.UTF8Encoding($false,$true);$bad=$false;foreach($file in $files){$tokens=$null;$errors=$null;$source=[IO.File]::ReadAllText($file,$utf8);[void][Management.Automation.Language.Parser]::ParseInput($source,$file,[ref]$tokens,[ref]$errors);if($errors.Count){$bad=$true;$errors|ForEach-Object{Write-Error $_.Message}}};if($bad){exit 1}`;
   const encoded = Buffer.from(command, 'utf16le').toString('base64');
   const powershell = path.join(
     process.env.SystemRoot || 'C:\\Windows',

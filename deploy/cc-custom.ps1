@@ -1,4 +1,4 @@
-﻿#requires -Version 5.1
+#Requires -Version 5.1
 
 param(
     [Parameter(Position=0)]
@@ -17,14 +17,30 @@ param(
 #   3. 安装完成后主动追加 $env:PROGRAMDATA\claude\bin 到 HKLM PATH
 #   4. 重建并验证精确 ACL，Users 仅可读取共享程序目录，防止目录接管
 #
-# 说明：本脚本设计为 `irm URL | iex` 与文件两种方式均可执行。
-# 通过 iex 调用时 param() 会被忽略，$Target 采用默认值 "latest"；
-# 需指定版本时请下载后按文件运行：powershell -File cc-custom.ps1 1.2.3
+# 说明：本脚本以 `irm URL | iex` 和安装器内置 UTF-8 加载器为执行入口。
+# 通过 iex 调用时 $Target 采用默认值 "latest"；指定版本时应以严格 UTF-8
+# 读取脚本，再通过 ScriptBlock.Create 调用，具体命令见 deploy/README.md。
 # ---------------------------------------------------------------
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $ProgressPreference = 'SilentlyContinue'
+
+function Assert-Administrator {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    try {
+        $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+        if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+            throw "[ERROR] 需要管理员权限。请以管理员身份打开 PowerShell 后重新执行安装命令。"
+        }
+    }
+    finally {
+        $identity.Dispose()
+    }
+}
+
+Assert-Administrator
+
 [Net.ServicePointManager]::SecurityProtocol = `
     [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 

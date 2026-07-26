@@ -1,33 +1,45 @@
 /**
  * 集中配置：内置安装脚本、Git 镜像、目标目录。
  */
+const GIT_VERSION = '2.55.0.windows.3';
+const GIT_FILENAME = 'Git-2.55.0.3-64-bit.exe';
+const GIT_SIZE = 65388144;
+const GIT_SHA256 = 'af12577d0fdff74243a5988197aa49b957d5044edc17004f6ddf0768996f1dca';
+
 module.exports = {
   INSTALL_SCRIPT: {
     name: '安装包内置 Windows 脚本',
     relativePath: 'deploy/cc-custom.ps1',
-    sha256: 'b5e2d500394d0ce645caecdc47eb3e775a4a63bab4045a56f998353a287320e0',
+    sha256: '08ff0391180d4c8366e1908dcb9c65820fcea175eead9142164d3f0b6201a72c',
   },
   GIT_MIRRORS: [
     {
       id: 'github',
       name: 'Git for Windows 官方 GitHub Releases',
-      url: 'https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/Git-2.47.1-64-bit.exe',
-      size: 69109976,
-      sha256: '25527923debc06515b3016f2d6bca0820656e8281a23be2f43bfb658bd5dda70',
+      url: `https://github.com/git-for-windows/git/releases/download/v${GIT_VERSION}/${GIT_FILENAME}`,
+      size: GIT_SIZE,
+      sha256: GIT_SHA256,
     },
     {
-      id: 'ghproxy-git',
-      name: 'GitHub 镜像加速 (ghproxy.com)',
-      url: 'https://ghproxy.com/https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/Git-2.47.1-64-bit.exe',
-      size: 69109976,
-      sha256: '25527923debc06515b3016f2d6bca0820656e8281a23be2f43bfb658bd5dda70',
+      id: 'tuna-git',
+      name: '清华大学 TUNA GitHub Release 镜像',
+      url: `https://mirrors.tuna.tsinghua.edu.cn/github-release/git-for-windows/git/Git%20for%20Windows%202.55.0%283%29/${GIT_FILENAME}`,
+      size: GIT_SIZE,
+      sha256: GIT_SHA256,
     },
     {
-      id: 'mirror-ghproxy-git',
-      name: 'GitHub 镜像加速 (mirror.ghproxy.com)',
-      url: 'https://mirror.ghproxy.com/https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/Git-2.47.1-64-bit.exe',
-      size: 69109976,
-      sha256: '25527923debc06515b3016f2d6bca0820656e8281a23be2f43bfb658bd5dda70',
+      id: 'npmmirror-git',
+      name: '阿里云 CDN (npmmirror)',
+      url: `https://registry.npmmirror.com/-/binary/git-for-windows/v${GIT_VERSION}/${GIT_FILENAME}`,
+      size: GIT_SIZE,
+      sha256: GIT_SHA256,
+    },
+    {
+      id: 'huawei-git',
+      name: '华为云 Git for Windows 镜像',
+      url: `https://mirrors.huaweicloud.com/git-for-windows/v${GIT_VERSION}/${GIT_FILENAME}`,
+      size: GIT_SIZE,
+      sha256: GIT_SHA256,
     },
   ],
   URL_WHITELIST: [
@@ -37,6 +49,10 @@ module.exports = {
     'release-assets.githubusercontent.com',
     'codeload.github.com',
     'storage.googleapis.com',
+    'mirrors.tuna.tsinghua.edu.cn',
+    'registry.npmmirror.com',
+    'cdn.npmmirror.com',
+    'mirrors.huaweicloud.com',
     'ghproxy.com',
     'mirror.ghproxy.com',
   ],

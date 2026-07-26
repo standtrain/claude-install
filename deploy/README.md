@@ -11,6 +11,16 @@
 | `ccswitch.ps1` | Windows | 安装 CC Switch | `irm https://YOUR-DOMAIN.example/ccswitch.ps1 \| iex` |
 | `ccswitch.sh` | Linux | 安装 CC Switch | `wget -qO- https://YOUR-DOMAIN.example/ccswitch.sh \| sudo sh` |
 
+Windows 脚本必须在“以管理员身份运行”的 Windows PowerShell 5.1 中执行。脚本会在任何下载或目录修改前验证当前令牌已经提升；普通 PowerShell 窗口会直接停止并给出明确提示。
+
+`cc-custom.ps1` 需要指定版本时，不要用 Windows PowerShell 5.1 的默认 ANSI 文件读取方式。下载后应显式按严格 UTF-8 解析：
+
+```powershell
+$utf8 = New-Object Text.UTF8Encoding($false, $true)
+$code = [IO.File]::ReadAllText((Resolve-Path .\cc-custom.ps1), $utf8)
+& ([ScriptBlock]::Create($code)) 1.2.3
+```
+
 Linux 脚本在开始执行后会自动选择系统已有的 `curl` 或 `wget` 下载后续文件。入口命令仍依赖用来获取脚本的本地工具：如果 `curl` 不存在，`curl ... | sudo sh` 会在脚本下载前失败，远程脚本没有机会自行安装 `curl`。
 
 无 `curl`、有 `wget` 时直接使用：

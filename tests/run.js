@@ -129,6 +129,24 @@ test('Windows downloader', () => downloaderSuite(
   path.join(__dirname, '..', 'src', 'main', 'env'),
 ));
 
+test('Windows Git mirrors pin the latest verified release', () => {
+  const root = path.join(__dirname, '..');
+  const env = require(path.join(root, 'src', 'main', 'env'));
+  const downloader = require(path.join(root, 'src', 'main', 'installer', 'downloader'));
+  const expectedIds = ['github', 'tuna-git', 'npmmirror-git', 'huawei-git'];
+  const ids = env.GIT_MIRRORS.map((source) => source.id);
+
+  assert.deepStrictEqual(ids, expectedIds);
+  assert.strictEqual(new Set(ids).size, ids.length);
+  env.GIT_MIRRORS.forEach((source) => {
+    assert(/2\.55\.0/.test(source.url));
+    assert.strictEqual(source.size, 65388144);
+    assert.strictEqual(source.sha256, 'af12577d0fdff74243a5988197aa49b957d5044edc17004f6ddf0768996f1dca');
+    assert.strictEqual(downloader.isAllowed(source.url), true);
+  });
+  assert(env.URL_WHITELIST.includes('cdn.npmmirror.com'));
+});
+
 test('Windows config verification safety', () => {
   const tempRoot = process.env.CCP_TEST_TMPDIR || os.tmpdir();
   const temp = fs.mkdtempSync(path.join(tempRoot, 'claude-config-test-'));
@@ -196,6 +214,26 @@ test('Windows privileged command and CC Switch pinning contracts', async () => {
   const switchSource = fs.readFileSync(`${switchInstallerPath}.js`, 'utf8');
   assert(!/readJson|releases\/latest|githubApi/.test(switchSource));
   assert(/EXECUTABLES\.msiexec/.test(switchSource));
+});
+
+test('PowerShell web bootstrap contracts', () => {
+  const deployRoot = path.join(__dirname, '..', 'deploy');
+  ['cc-custom.ps1', 'ccswitch.ps1'].forEach((name) => {
+    const bytes = fs.readFileSync(path.join(deployRoot, name));
+    assert(bytes.length > 3);
+    assert.notDeepStrictEqual(Array.from(bytes.slice(0, 3)), [0xef, 0xbb, 0xbf]);
+
+    const source = bytes.toString('utf8');
+    assert(/^#requires -Version 5\.1/i.test(source));
+    assert(/function Assert-Administrator/.test(source));
+    assert(/WindowsBuiltInRole\]::Administrator/.test(source));
+    const invocation = source.indexOf('\nAssert-Administrator\n');
+    const firstNetworkOperation = source.search(/Invoke-(?:RestMethod|WebRequest)|\.GetResponse\(/);
+    const firstDirectoryMutation = source.search(/Directory\]::CreateDirectory|New-Item/);
+    assert(invocation > 0);
+    assert(firstNetworkOperation === -1 || invocation < firstNetworkOperation);
+    assert(firstDirectoryMutation === -1 || invocation < firstDirectoryMutation);
+  });
 });
 
 test('Linux target user and verification contracts', async () => {
