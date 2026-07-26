@@ -433,9 +433,12 @@ test('build metadata contracts', async () => {
     path.join(root, 'linux-installer', 'src', 'main', 'installer', 'bundledScript.js'),
     'utf8',
   )));
+  assert(/target === 'AppImage' && !architecture/.test(buildScript));
+  assert(/\? \['x64', 'arm64'\]/.test(buildScript));
+  assert(/for \(const buildArchitecture of buildArchitectures\)/.test(buildScript));
   assert(/const args = \[builderCli, `--\$\{platform\}`\];/.test(buildScript));
   assert(/if \(target\) args\.push\(target\)/.test(buildScript));
-  assert(/if \(architecture\) args\.push\(`--\$\{architecture\}`\)/.test(buildScript));
+  assert(/if \(buildArchitecture\) args\.push\(`--\$\{buildArchitecture\}`\)/.test(buildScript));
   assert(/shell:\s*false/.test(buildScript));
   assert(!/shell:\s*true/.test(buildScript));
 });

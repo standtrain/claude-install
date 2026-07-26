@@ -83,31 +83,37 @@ if (!fs.existsSync(configPath) || !fs.statSync(configPath).isFile()) {
 }
 
 const buildTime = new Date().toISOString();
-const args = [builderCli, `--${platform}`];
-if (target) args.push(target);
-if (architecture) args.push(`--${architecture}`);
-args.push('--projectDir', projectDir, '--config', configPath);
-args.push(`-c.extraMetadata.buildTime=${buildTime}`);
+const buildArchitectures = platform === 'linux' && target === 'AppImage' && !architecture
+  ? ['x64', 'arm64']
+  : [architecture];
 
-console.log(`[build] platform=${platform} target=${target || 'all'} arch=${architecture || 'default'} buildTime=${buildTime}`);
-const result = spawnSync(process.execPath, args, {
-  cwd: rootDir,
-  stdio: 'inherit',
-  env: process.env,
-  shell: false,
-  windowsHide: true,
-});
+for (const buildArchitecture of buildArchitectures) {
+  const args = [builderCli, `--${platform}`];
+  if (target) args.push(target);
+  if (buildArchitecture) args.push(`--${buildArchitecture}`);
+  args.push('--projectDir', projectDir, '--config', configPath);
+  args.push(`-c.extraMetadata.buildTime=${buildTime}`);
 
-if (result.error) {
-  console.error(`[build] 启动失败：${result.error.message}`);
-  process.exit(1);
+  console.log(`[build] platform=${platform} target=${target || 'all'} arch=${buildArchitecture || 'default'} buildTime=${buildTime}`);
+  const result = spawnSync(process.execPath, args, {
+    cwd: rootDir,
+    stdio: 'inherit',
+    env: process.env,
+    shell: false,
+    windowsHide: true,
+  });
+
+  if (result.error) {
+    console.error(`[build] 启动失败：${result.error.message}`);
+    process.exit(1);
+  }
+  if (result.signal) {
+    console.error(`[build] 被信号中止：${result.signal}`);
+    process.exit(1);
+  }
+  const status = Number.isInteger(result.status) ? result.status : 1;
+  if (status !== 0) process.exit(status);
 }
-if (result.signal) {
-  console.error(`[build] 被信号中止：${result.signal}`);
-  process.exit(1);
-}
-const status = Number.isInteger(result.status) ? result.status : 1;
-if (status !== 0) process.exit(status);
 
 if (platform === 'linux' && (target === '' || target === 'AppImage')) {
   const { createExecutableAppImageArchive } = require('./appimageArchive');
