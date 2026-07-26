@@ -38,8 +38,8 @@ $DownloadAttempts = 3
 $PrivateDirectoryPrefix = 'ccswitch-'
 $PrivateMsiName = 'CC-Switch.msi'
 $MirrorPrefixes = @(
-    'https://ghproxy.net/',
     'https://gh-proxy.com/',
+    'https://ghproxy.net/',
     'https://ghfast.top/'
 )
 
@@ -274,7 +274,7 @@ function Invoke-HttpDownloadOnce {
         [Parameter(Mandatory = $true)][string]$PrivateDirectory
     )
 
-    Assert-PrivateInstallerFilePath -PrivateDirectory $PrivateDirectory -Path $Destination
+    [void](Assert-PrivateInstallerFilePath -PrivateDirectory $PrivateDirectory -Path $Destination)
     if ([int64]$Source.ExpectedSize -lt $MinimumAssetSize -or [int64]$Source.ExpectedSize -gt $MaximumAssetSize) {
         throw 'INVALID_ASSET_SIZE'
     }
@@ -339,7 +339,7 @@ function Invoke-HttpDownloadOnce {
             [int64]$totalBytes = 0
             try {
                 $inputStream = $response.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
-                Assert-PrivateInstallerFilePath -PrivateDirectory $PrivateDirectory -Path $Destination
+                [void](Assert-PrivateInstallerFilePath -PrivateDirectory $PrivateDirectory -Path $Destination)
                 $outputStream = [System.IO.File]::Open(
                     $Destination,
                     [System.IO.FileMode]::CreateNew,
@@ -363,7 +363,7 @@ function Invoke-HttpDownloadOnce {
             if ($totalBytes -ne [int64]$Source.ExpectedSize) {
                 throw 'DOWNLOAD_SIZE_MISMATCH'
             }
-            Assert-PrivateInstallerFilePath -PrivateDirectory $PrivateDirectory -Path $Destination
+            [void](Assert-PrivateInstallerFilePath -PrivateDirectory $PrivateDirectory -Path $Destination)
             return
         }
     }
@@ -742,7 +742,8 @@ function Invoke-VerifiedDownload {
     for ($attempt = 1; $attempt -le $DownloadAttempts; $attempt++) {
         try {
             Remove-PrivateInstallerFile -PrivateDirectory $PrivateDirectory -Path $Destination
-            Invoke-HttpDownloadOnce -Source $Source -Destination $Destination -PrivateDirectory $PrivateDirectory
+            # Helper output must never become a successful download result in PowerShell's pipeline.
+            [void](Invoke-HttpDownloadOnce -Source $Source -Destination $Destination -PrivateDirectory $PrivateDirectory)
             $fingerprint = Get-PrivateFileFingerprintWithRetry `
                 -PrivateDirectory $PrivateDirectory `
                 -Path $Destination `

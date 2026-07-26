@@ -140,6 +140,9 @@ if (shell) {
   const wgetCompatibilityTest = path.join(root, 'tests', 'wget-compat.sh');
   run(shell, ['-n', wgetCompatibilityTest], 'wget 兼容性测试语法检查');
   run(shell, [wgetCompatibilityTest], 'wget 兼容性行为检查');
+  const switchFallbackTest = path.join(root, 'tests', 'ccswitch-source-fallback.sh');
+  run(shell, ['-n', switchFallbackTest], 'CC Switch 来源回退测试语法检查');
+  run(shell, [switchFallbackTest], 'CC Switch 来源回退行为检查');
 } else {
   fail('未找到可用于 shell -n 的解释器');
 }
@@ -157,6 +160,11 @@ if (process.platform === 'win32') {
     'powershell.exe',
   );
   run(powershell, ['-NoLogo', '-NoProfile', '-EncodedCommand', encoded], 'PowerShell 5.1 AST 检查');
+  run(
+    powershell,
+    ['-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(root, 'tests', 'ccswitch-pipeline.ps1')],
+    'CC Switch PowerShell 管道行为检查',
+  );
 }
 
 if (process.exitCode) process.exit(process.exitCode);

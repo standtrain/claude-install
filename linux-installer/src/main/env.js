@@ -16,7 +16,7 @@ module.exports = {
   CCSWITCH_SCRIPT: {
     name: '安装包内置 CC Switch 脚本',
     relativePath: 'deploy/ccswitch.sh',
-    sha256: '37eca300575c1f36a8184701d7540b258cae91cd366e5dec509cc02ba9c83cba',
+    sha256: 'a7805a8d16e359501683c5becc30db99a04756bec1a5ba3057088cb63aae7b59',
   },
 
   // ── Git 包管理器方案（Linux 非必要，仅兜底） ──

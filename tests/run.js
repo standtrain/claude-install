@@ -214,7 +214,7 @@ test('Windows privileged command and CC Switch pinning contracts', async () => {
   });
   assert.deepStrictEqual(
     sources.slice(1).map((source) => new URL(source.url).hostname),
-    ['ghproxy.net', 'gh-proxy.com', 'ghfast.top'],
+    ['gh-proxy.com', 'ghproxy.net', 'ghfast.top'],
   );
   const switchSource = fs.readFileSync(`${switchInstallerPath}.js`, 'utf8');
   assert(!/readJson|releases\/latest|githubApi/.test(switchSource));
@@ -397,12 +397,26 @@ test('deploy bootstrap contracts', async () => {
   assert(/ulimit -c 0/.test(claudeScript));
   assert(/ulimit -f/.test(claudeScript));
   assert(/SHA256 校验失败/.test(switchScript));
+  assert(/while \[ "\$DOWNLOAD_ROUND" -le "\$MAX_ATTEMPTS" \]/.test(switchScript));
+  assert(
+    switchScript.lastIndexOf('https://gh-proxy.com/')
+      < switchScript.lastIndexOf('https://ghproxy.net/'),
+  );
   ['ghproxy.net', 'gh-proxy.com', 'ghfast.top'].forEach((host) => {
     assert(switchScript.includes(host));
     assert(switchPowerShell.includes(host));
   });
   assert(/function Assert-AssetTransportUrl/.test(switchPowerShell));
   assert(/New-TransportSources/.test(switchPowerShell));
+  assert(
+    switchPowerShell.indexOf("'https://gh-proxy.com/'")
+      < switchPowerShell.indexOf("'https://ghproxy.net/'"),
+  );
+  assert.strictEqual(
+    (switchPowerShell.match(/\[void\]\(Assert-PrivateInstallerFilePath/g) || []).length,
+    3,
+  );
+  assert(/\[void\]\(Invoke-HttpDownloadOnce/.test(switchPowerShell));
   assert(/try\s*\{\s*\$msiFingerprint = Invoke-VerifiedDownload/.test(switchPowerShell));
   assert(/catch\s*\{\s*\$msiFingerprint = \$null/.test(switchPowerShell));
   assert(/\$sourceIndex \+ 1 -lt \$transportSources\.Count/.test(switchPowerShell));

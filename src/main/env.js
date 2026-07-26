@@ -53,8 +53,8 @@ module.exports = {
     'registry.npmmirror.com',
     'cdn.npmmirror.com',
     'mirrors.huaweicloud.com',
-    'ghproxy.net',
     'gh-proxy.com',
+    'ghproxy.net',
     'ghfast.top',
   ],
 
@@ -73,8 +73,8 @@ module.exports = {
   CCSWITCH: {
     // GitHub 镜像加速代理（自动派生：代理域名 + 原始 GitHub URL）
     ghMirrorProxies: [
-      { name: 'ghproxy.net', url: 'https://ghproxy.net/' },
       { name: 'gh-proxy.com', url: 'https://gh-proxy.com/' },
+      { name: 'ghproxy.net', url: 'https://ghproxy.net/' },
       { name: 'ghfast.top', url: 'https://ghfast.top/' },
     ],
     // 只接受经过离线审查的固定版本、大小与 SHA256。

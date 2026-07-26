@@ -109,13 +109,13 @@ is_allowed_transport_url() {
                 *) return 1 ;;
             esac
             ;;
-        ghproxy.net)
-            [ "$_url" = "https://ghproxy.net/$PINNED_X86_64_URL" ] \
-                || [ "$_url" = "https://ghproxy.net/$PINNED_ARM64_URL" ]
-            ;;
         gh-proxy.com)
             [ "$_url" = "https://gh-proxy.com/$PINNED_X86_64_URL" ] \
                 || [ "$_url" = "https://gh-proxy.com/$PINNED_ARM64_URL" ]
+            ;;
+        ghproxy.net)
+            [ "$_url" = "https://ghproxy.net/$PINNED_X86_64_URL" ] \
+                || [ "$_url" = "https://ghproxy.net/$PINNED_ARM64_URL" ]
             ;;
         ghfast.top)
             [ "$_url" = "https://ghfast.top/$PINNED_X86_64_URL" ] \
@@ -275,20 +275,60 @@ download_file() {
     is_allowed_transport_url "$_url" || return 1
     valid_size "$_max_bytes" || return 1
 
-    _attempt=1
-    while [ "$_attempt" -le "$MAX_ATTEMPTS" ]; do
-        if [ "$DOWNLOADER" = curl ]; then
-            if download_with_curl "$_url" "$_output" "$_max_bytes"; then
-                return 0
-            fi
-        elif download_with_wget "$_url" "$_output" "$_max_bytes"; then
+    if [ "$DOWNLOADER" = curl ]; then
+        if download_with_curl "$_url" "$_output" "$_max_bytes"; then
             return 0
         fi
-        printf '[WARN] 下载失败（第 %s/%s 次）\n' "$_attempt" "$MAX_ATTEMPTS" >&2
-        _attempt=$((_attempt + 1))
-    done
+    elif download_with_wget "$_url" "$_output" "$_max_bytes"; then
+        return 0
+    fi
     rm -f -- "$_output"
     return 1
+}
+
+download_from_sources() {
+    DOWNLOADED=false
+    DOWNLOAD_ROUND=1
+    while [ "$DOWNLOAD_ROUND" -le "$MAX_ATTEMPTS" ] && [ "$DOWNLOADED" = false ]; do
+        SOURCE_INDEX=0
+        for SOURCE_URL in \
+            "$PINNED_URL" \
+            "https://gh-proxy.com/$PINNED_URL" \
+            "https://ghproxy.net/$PINNED_URL" \
+            "https://ghfast.top/$PINNED_URL"
+        do
+            SOURCE_INDEX=$((SOURCE_INDEX + 1))
+            printf '[INFO] 尝试固定版本下载源 %s/4（第 %s/%s 轮）\n' \
+                "$SOURCE_INDEX" "$DOWNLOAD_ROUND" "$MAX_ATTEMPTS"
+            if ! download_file "$SOURCE_URL" "$DEST" "$PINNED_SIZE"; then
+                printf '[WARN] 下载失败，尝试下一个下载源\n' >&2
+                continue
+            fi
+
+            ACTUAL_SIZE=$(file_size "$DEST") || fail "无法读取下载文件大小"
+            if [ "$ACTUAL_SIZE" -ne "$PINNED_SIZE" ]; then
+                printf '[WARN] 文件大小校验失败，尝试下一个下载源\n' >&2
+                rm -f -- "$DEST"
+                continue
+            fi
+            if ! is_expected_elf "$DEST" "$EXPECTED_MACHINE"; then
+                printf '[WARN] ELF 文件类型或架构校验失败，尝试下一个下载源\n' >&2
+                rm -f -- "$DEST"
+                continue
+            fi
+            ACTUAL_SHA256=$(sha256_file "$DEST") || fail "无法计算下载文件 SHA256"
+            if [ "$ACTUAL_SHA256" != "$PINNED_SHA256" ]; then
+                printf '[WARN] SHA256 校验失败，尝试下一个下载源\n' >&2
+                rm -f -- "$DEST"
+                continue
+            fi
+            DOWNLOADED=true
+            break
+        done
+        DOWNLOAD_ROUND=$((DOWNLOAD_ROUND + 1))
+    done
+
+    [ "$DOWNLOADED" = true ] && [ -f "$DEST" ]
 }
 
 sha256_file() {
@@ -389,42 +429,7 @@ DEST="$TMP_DIR/CC-Switch.AppImage"
 printf '[INFO] CC Switch Linux 安装器，版本: %s，架构: %s，下载器: %s\n' \
     "$PINNED_VERSION" "$ARCH" "$DOWNLOADER"
 
-SOURCE_INDEX=0
-DOWNLOADED=false
-for SOURCE_URL in \
-    "$PINNED_URL" \
-    "https://ghproxy.net/$PINNED_URL" \
-    "https://gh-proxy.com/$PINNED_URL" \
-    "https://ghfast.top/$PINNED_URL"
-do
-    SOURCE_INDEX=$((SOURCE_INDEX + 1))
-    printf '[INFO] 尝试固定版本下载源 %s/4\n' "$SOURCE_INDEX"
-    if ! download_file "$SOURCE_URL" "$DEST" "$PINNED_SIZE"; then
-        continue
-    fi
-
-    ACTUAL_SIZE=$(file_size "$DEST") || fail "无法读取下载文件大小"
-    if [ "$ACTUAL_SIZE" -ne "$PINNED_SIZE" ]; then
-        printf '[WARN] 文件大小校验失败，尝试下一个下载源\n' >&2
-        rm -f -- "$DEST"
-        continue
-    fi
-    if ! is_expected_elf "$DEST" "$EXPECTED_MACHINE"; then
-        printf '[WARN] ELF 文件类型或架构校验失败，尝试下一个下载源\n' >&2
-        rm -f -- "$DEST"
-        continue
-    fi
-    ACTUAL_SHA256=$(sha256_file "$DEST") || fail "无法计算下载文件 SHA256"
-    if [ "$ACTUAL_SHA256" != "$PINNED_SHA256" ]; then
-        printf '[WARN] SHA256 校验失败，尝试下一个下载源\n' >&2
-        rm -f -- "$DEST"
-        continue
-    fi
-    DOWNLOADED=true
-    break
-done
-
-[ "$DOWNLOADED" = true ] && [ -f "$DEST" ] \
+download_from_sources \
     || fail "所有固定版本下载源均失败，现有安装未被修改"
 
 if [ -e "$BIN_LINK" ] && [ ! -L "$BIN_LINK" ]; then
