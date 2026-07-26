@@ -106,4 +106,24 @@ if (result.signal) {
   console.error(`[build] 被信号中止：${result.signal}`);
   process.exit(1);
 }
-process.exit(Number.isInteger(result.status) ? result.status : 1);
+const status = Number.isInteger(result.status) ? result.status : 1;
+if (status !== 0) process.exit(status);
+
+if (platform === 'linux' && (target === '' || target === 'AppImage')) {
+  const { createExecutableAppImageArchive } = require('./appimageArchive');
+  const architectures = architecture ? [architecture] : ['x64', 'arm64'];
+  Promise.all(architectures.map((arch) => {
+    const artifactArch = arch === 'x64' ? 'x86_64' : arch;
+    const appImage = path.join(
+      projectDir,
+      'dist',
+      `ClaudeCLIInstaller-Linux-${rootPackage.version}-${artifactArch}.AppImage`,
+    );
+    return createExecutableAppImageArchive(appImage, `${appImage}.tar.gz`).then((archive) => {
+      console.log(`[build] executable AppImage archive=${archive}`);
+    });
+  })).catch((error) => {
+    console.error(`[build] AppImage 可执行归档失败：${error.message}`);
+    process.exitCode = 1;
+  });
+}

@@ -36,6 +36,28 @@ npm run dist:rpm      # Linux：仅 rpm
 
 需要指定架构时可直接使用统一入口，例如：`node scripts/build.js linux AppImage arm64`。
 
+### 运行 AppImage
+
+Linux 下载文件默认没有可执行权限。构建同时生成保留 `0755` 权限的 `.AppImage.tar.gz`，建议下载对应架构的归档后运行：
+
+```bash
+tar -xzf ClaudeCLIInstaller-Linux-0.3.4-x86_64.AppImage.tar.gz
+./ClaudeCLIInstaller-Linux-0.3.4-x86_64.AppImage
+```
+
+直接下载 `.AppImage` 时需要先设置权限；不要使用 root 运行图形界面：
+
+```bash
+chmod 755 ClaudeCLIInstaller-Linux-0.3.4-x86_64.AppImage
+./ClaudeCLIInstaller-Linux-0.3.4-x86_64.AppImage
+```
+
+若系统未安装 FUSE 2，可使用 AppImage 自带的解包运行模式：
+
+```bash
+APPIMAGE_EXTRACT_AND_RUN=1 ./ClaudeCLIInstaller-Linux-0.3.4-x86_64.AppImage
+```
+
 ## Linux 远程安装
 
 `deploy/cc-custom.sh` 和 `deploy/ccswitch.sh` 在启动后都会自动选择系统已有的 `curl` 或 `wget` 下载后续文件。但启动命令本身使用哪个工具，决定了脚本能否先被下载。

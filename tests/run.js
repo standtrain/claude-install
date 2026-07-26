@@ -5,6 +5,7 @@ const fs = require('fs');
 const http = require('http');
 const os = require('os');
 const path = require('path');
+const zlib = require('zlib');
 
 if (process.platform === 'win32') {
   process.env.LOCALAPPDATA = process.env.CCP_TEST_TMPDIR || os.tmpdir();
@@ -437,6 +438,33 @@ test('build metadata contracts', async () => {
   assert(/if \(architecture\) args\.push\(`--\$\{architecture\}`\)/.test(buildScript));
   assert(/shell:\s*false/.test(buildScript));
   assert(!/shell:\s*true/.test(buildScript));
+});
+
+test('AppImage archive preserves executable mode and payload', async () => {
+  const tempRoot = process.env.CCP_TEST_TMPDIR || os.tmpdir();
+  const temp = fs.mkdtempSync(path.join(tempRoot, 'appimage-archive-test-'));
+  const input = path.join(temp, 'Test-x86_64.AppImage');
+  const output = `${input}.tar.gz`;
+  const payload = Buffer.alloc(4096, 0x5a);
+  payload.set(Buffer.from([0x7f, 0x45, 0x4c, 0x46]), 0);
+  payload.set(Buffer.from([0x41, 0x49, 0x02]), 8);
+
+  try {
+    fs.writeFileSync(input, payload, { mode: 0o600 });
+    const archive = require(path.join(__dirname, '..', 'scripts', 'appimageArchive'));
+    await archive.createExecutableAppImageArchive(input, output);
+    const tar = zlib.gunzipSync(fs.readFileSync(output));
+    const name = tar.slice(0, 100).toString('ascii').replace(/\0.*$/, '');
+    const mode = parseInt(tar.slice(100, 108).toString('ascii').replace(/\0.*$/, ''), 8);
+    const size = parseInt(tar.slice(124, 136).toString('ascii').replace(/\0.*$/, ''), 8);
+
+    assert.strictEqual(name, path.basename(input));
+    assert.strictEqual(mode, 0o755);
+    assert.strictEqual(size, payload.length);
+    assert.deepStrictEqual(tar.slice(512, 512 + size), payload);
+  } finally {
+    removeTree(temp);
+  }
 });
 
 test('privileged process does not expose an interactive shell', () => {
