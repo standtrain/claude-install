@@ -2,50 +2,34 @@
 
 基于 Electron 的 Windows/Linux 图形化安装器，并提供可独立部署的 Claude CLI 与 CC Switch 安装脚本。安装流程包含下载源校验、文件大小与 SHA256 校验、原子替换、配置备份和系统命令入口创建。
 
-## 开发与检查
+## 直接下载安装（推荐 0基础请看这里）
 
-项目最低运行环境为 Node.js 11.9.0。
+**Release 页面提供已构建好的安装程序，无需克隆源码、无需安装 Node.js，下载即可使用：**
 
-```powershell
-npm ci
-npm test
-npm run check
-npm start
-```
+| 平台 | 文件 | 说明 |
+| --- | --- | --- |
+| Windows | `ClaudeCLIInstaller-Setup-x.x.x.exe` | NSIS 安装包，双击运行 |
+| Windows | `ClaudeCLIInstaller-Portable-x.x.x.zip` | 便携版，解压即用 |
+| Linux x86_64 | `ClaudeCLIInstaller-Linux-x.x.x-x86_64.AppImage.tar.gz` | AppImage（保留可执行权限） |
+| Linux x86_64 | `ClaudeCLIInstaller-Linux-x.x.x-x86_64.AppImage` | 独立 AppImage |
+| Linux x86_64 | `ClaudeCLIInstaller-Linux-x.x.x-x86_64.deb` | Debian/Ubuntu 安装包 |
+| Linux x86_64 | `ClaudeCLIInstaller-Linux-x.x.x-x86_64.rpm` | Fedora/RHEL 安装包 |
+| Linux arm64 | `ClaudeCLIInstaller-Linux-x.x.x-arm64.AppImage.tar.gz` | ARM64 AppImage（保留可执行权限） |
+| Linux arm64 | `ClaudeCLIInstaller-Linux-x.x.x-arm64.deb` | ARM64 Debian/Ubuntu 安装包 |
+| Linux arm64 | `ClaudeCLIInstaller-Linux-x.x.x-arm64.rpm` | ARM64 Fedora/RHEL 安装包 |
 
-启动 Linux 界面：
+前往项目 **Release 页面**查看所有可用版本、校验和与更新日志。
 
-```powershell
-npm run start:linux
-```
+### AppImage 使用说明
 
-## 构建
-
-所有构建命令统一由 `scripts/build.js` 调度，产物写入 `dist/` 或 `linux-installer/dist/`。
-依赖统一由根目录的 `package-lock.json` 管理，Linux 子项目不维护重复锁文件。
-
-```powershell
-npm run dist          # Windows：NSIS 安装包和便携版
-npm run dist:portable # Windows：仅便携版
-npm run dist:nsis     # Windows：仅 NSIS 安装包
-npm run dist:linux    # Linux：全部目标
-npm run dist:appimage # Linux：仅 AppImage
-npm run dist:deb      # Linux：仅 deb
-npm run dist:rpm      # Linux：仅 rpm
-```
-
-需要指定架构时可直接使用统一入口，例如：`node scripts/build.js linux AppImage arm64`。
-
-### 运行 AppImage
-
-Linux 下载文件默认没有可执行权限。构建同时生成保留 `0755` 权限的 `.AppImage.tar.gz`，建议下载对应架构的归档后运行：
+推荐下载 `.AppImage.tar.gz` 归档（已保留可执行权限）：
 
 ```bash
 tar -xzf ClaudeCLIInstaller-Linux-0.3.4-x86_64.AppImage.tar.gz
 ./ClaudeCLIInstaller-Linux-0.3.4-x86_64.AppImage
 ```
 
-直接下载 `.AppImage` 时需要先设置权限；不要使用 root 运行图形界面：
+直接下载 `.AppImage` 时需要手动添加权限；不要使用 root 运行图形界面：
 
 ```bash
 chmod 755 ClaudeCLIInstaller-Linux-0.3.4-x86_64.AppImage
@@ -58,9 +42,17 @@ chmod 755 ClaudeCLIInstaller-Linux-0.3.4-x86_64.AppImage
 APPIMAGE_EXTRACT_AND_RUN=1 ./ClaudeCLIInstaller-Linux-0.3.4-x86_64.AppImage
 ```
 
-## Linux 远程安装
+------
 
-`deploy/cc-custom.sh` 和 `deploy/ccswitch.sh` 在启动后都会自动选择系统已有的 `curl` 或 `wget` 下载后续文件。但启动命令本身使用哪个工具，决定了脚本能否先被下载。
+
+
+## 以下是微基础内容，0基础请完全忽略
+
+## Linux 命令行远程安装
+
+如果只需要命令行工具（Claude CLI / CC Switch），无需下载图形安装器，一行命令即可完成远程安装。
+
+`deploy/cc-custom.sh` 和 `deploy/ccswitch.sh` 在启动后会自动选择系统已有的 `curl` 或 `wget` 下载后续文件。
 
 系统有 `curl` 时：
 
@@ -99,9 +91,51 @@ sudo apt install -y curl
 curl -fsSL https://claude.fernweh.top/ccswitch.sh | sudo sh
 ```
 
-> 当终端提示“找不到命令 curl”时，远程脚本尚未下载和执行，因此脚本不可能自行安装 `curl`。必须改用本机已有的 `wget`，或先安装 `curl`。如果两者都不存在，需要先通过系统包管理器安装其中之一。
+> 当终端提示"找不到命令 curl"时，远程脚本尚未下载和执行，因此脚本不可能自行安装 `curl`。必须改用本机已有的 `wget`，或先安装 `curl`。如果两者都不存在，需要先通过系统包管理器安装其中之一。
 
 Claude CLI 的 Linux 脚本使用方法相同，只需将 URL 改为 `https://claude.fernweh.top/cc-custom.sh`。
+
+------
+
+
+
+## 该项目是开源项目，如果你不是开发者请忽略以下内容
+
+## 从源码构建（开发者）
+
+> 普通用户无需阅读本节——直接下载 Release 中的预构建程序即可。
+
+项目最低运行环境为 Node.js 11.9.0。
+
+```powershell
+npm ci
+npm test
+npm run check
+npm start
+```
+
+启动 Linux 界面：
+
+```powershell
+npm run start:linux
+```
+
+### 构建命令
+
+所有构建命令统一由 `scripts/build.js` 调度，产物写入 `dist/` 或 `linux-installer/dist/`。
+依赖统一由根目录的 `package-lock.json` 管理，Linux 子项目不维护重复锁文件。
+
+```powershell
+npm run dist          # Windows：NSIS 安装包和便携版
+npm run dist:portable # Windows：仅便携版
+npm run dist:nsis     # Windows：仅 NSIS 安装包
+npm run dist:linux    # Linux：全部目标
+npm run dist:appimage # Linux：仅 AppImage
+npm run dist:deb      # Linux：仅 deb
+npm run dist:rpm      # Linux：仅 rpm
+```
+
+需要指定架构时可直接使用统一入口，例如：`node scripts/build.js linux AppImage arm64`。
 
 ## 目录结构
 
@@ -125,6 +159,7 @@ Claude CLI 的 Linux 脚本使用方法相同，只需将 URL 改为 `https://cl
 - 图形安装器只执行安装包内置且 SHA256 固定的部署脚本，不从远程选择脚本源。
 - CC Switch 固定为经过离线审查的 v3.18.0 元数据，并在 GitHub、ghproxy.net、gh-proxy.com 与 ghfast.top 间回退；镜像只承担传输，文件仍须匹配固定大小和 SHA256。
 - Linux Claude CLI 安装到 `/opt/claude`，通过 `/usr/local/bin/claude` 提供全局命令；CC Switch 安装到 `/opt/cc-switch`，通过 `/usr/local/bin/cc-switch` 提供命令。
+- Ubuntu 26 x86_64 的 VMware Wayland 会话会通过受保护启动器隔离冲突的 GIO 模块，并在解析路径、所有者和权限校验通过后预加载系统 `libwayland-client.so.0`，用于处理 AppImage 与宿主 EGL/Wayland 的 ABI 冲突。兼容层不修改 CC Switch 数据库，可用 `CC_SWITCH_LINUX_COMPAT=off` 关闭，或用 `CC_SWITCH_LINUX_COMPAT=force` 手动启用。
 - Windows 系统级安装目录为 `%ProgramData%\claude`，PATH 变更写入系统环境变量。
 
 ## 权限与配置安全

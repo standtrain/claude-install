@@ -74,8 +74,9 @@ curl -fsSL https://claude.fernweh.top/ccswitch.sh | sudo sh
 ### CC Switch
 
 - Windows 脚本安装官方 MSI；Linux 脚本将 AppImage 安装到 `/opt/cc-switch`。
-- Linux 创建 `/usr/local/bin/cc-switch` 命令和桌面入口。
+- Linux 创建 `/usr/local/bin/cc-switch` 命令、受保护的启动器和桌面入口。
 - Linux 脚本只安装内置元数据指定的 CC Switch v3.18.0，不读取动态 latest API。官方源与传输镜像下载的文件都必须匹配固定大小、ELF 架构和 SHA256。
+- Ubuntu 26 x86_64 的 VMware Wayland 会话会自动隔离冲突的 GIO 模块；使用 Wayland 时，启动器只在解析路径、所有者和权限校验通过后预加载系统 `libwayland-client.so.0`，用于处理 AppImage 与宿主 EGL/Wayland 的 ABI 冲突。兼容层不修改用户数据库；其他环境保持上游默认行为，可用 `CC_SWITCH_LINUX_COMPAT=off cc-switch` 关闭，或用 `CC_SWITCH_LINUX_COMPAT=force cc-switch` 手动启用。
 
 ## 部署步骤（Caddy）
 

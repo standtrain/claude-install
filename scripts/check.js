@@ -143,6 +143,9 @@ if (shell) {
   const switchFallbackTest = path.join(root, 'tests', 'ccswitch-source-fallback.sh');
   run(shell, ['-n', switchFallbackTest], 'CC Switch 来源回退测试语法检查');
   run(shell, [switchFallbackTest], 'CC Switch 来源回退行为检查');
+  const switchLauncherTest = path.join(root, 'tests', 'ccswitch-launcher-compat.sh');
+  run(shell, ['-n', switchLauncherTest], 'CC Switch Linux 启动器测试语法检查');
+  run(shell, [switchLauncherTest], 'CC Switch Linux 启动器行为检查');
 } else {
   fail('未找到可用于 shell -n 的解释器');
 }

@@ -8,6 +8,8 @@ export PATH
 
 INSTALL_DIR="/opt/cc-switch"
 APPIMAGE_PATH="$INSTALL_DIR/cc-switch.AppImage"
+LAUNCHER_PATH="$INSTALL_DIR/cc-switch-launcher"
+GIO_MODULE_DIR_PATH="$INSTALL_DIR/gio-modules"
 BIN_DIR="/usr/local/bin"
 BIN_LINK="$BIN_DIR/cc-switch"
 DESKTOP_DIR="/usr/share/applications"
@@ -28,6 +30,7 @@ MAX_ATTEMPTS=3
 
 TMP_DIR=""
 STAGED_APPIMAGE=""
+STAGED_LAUNCHER=""
 LINK_STAGE_DIR=""
 STAGED_DESKTOP=""
 
@@ -35,6 +38,11 @@ cleanup() {
     if [ -n "$STAGED_APPIMAGE" ]; then
         case "$STAGED_APPIMAGE" in
             "$INSTALL_DIR"/.cc-switch.AppImage.*) rm -f -- "$STAGED_APPIMAGE" ;;
+        esac
+    fi
+    if [ -n "$STAGED_LAUNCHER" ]; then
+        case "$STAGED_LAUNCHER" in
+            "$INSTALL_DIR"/.cc-switch-launcher.*) rm -f -- "$STAGED_LAUNCHER" ;;
         esac
     fi
     if [ -n "$LINK_STAGE_DIR" ]; then
@@ -375,11 +383,133 @@ ensure_system_directory() {
     ensure_secure_parent "$_directory"
 }
 
+write_launcher() {
+    _launcher_output=$1
+    cat > "$_launcher_output" <<'LAUNCHER'
+#!/bin/sh
+set -eu
+
+PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+export PATH
+
+APPIMAGE='/opt/cc-switch/cc-switch.AppImage'
+COMPAT_GIO_MODULE_DIR='/opt/cc-switch/gio-modules'
+HOST_WAYLAND_LIBRARY='/usr/lib/x86_64-linux-gnu/libwayland-client.so.0'
+
+launcher_fail() {
+    printf '[ERROR] CC Switch 启动失败: %s\n' "$1" >&2
+    exit 1
+}
+
+[ "$(id -u)" -ne 0 ] || launcher_fail '请使用普通桌面用户运行，不要使用 sudo'
+[ -f "$APPIMAGE" ] && [ ! -L "$APPIMAGE" ] && [ -x "$APPIMAGE" ] \
+    || launcher_fail '应用文件缺失或权限异常，请重新运行安装器'
+
+case "${CC_SWITCH_GDK_BACKEND:-}" in
+    ''|x11|wayland) ;;
+    *) launcher_fail 'CC_SWITCH_GDK_BACKEND 仅支持 x11 或 wayland' ;;
+esac
+
+case "${CC_SWITCH_LINUX_COMPAT:-auto}" in
+    auto|off|force) ;;
+    *) launcher_fail 'CC_SWITCH_LINUX_COMPAT 仅支持 auto、off 或 force' ;;
+esac
+
+if [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; then
+    launcher_fail '未检测到图形桌面会话'
+fi
+
+# v3.18.0 AppImage bundles libraries that conflict with Ubuntu 26's
+# GIO/Wayland stack under VMware. Keep the workaround narrowly scoped.
+_enable_compat=false
+if [ "${CC_SWITCH_LINUX_COMPAT:-auto}" = force ]; then
+    [ "$(uname -m)" = x86_64 ] \
+        || launcher_fail '强制兼容模式目前仅支持 x86_64'
+    _enable_compat=true
+elif [ "${CC_SWITCH_LINUX_COMPAT:-auto}" = auto ] \
+    && [ "$(uname -m)" = x86_64 ] \
+    && [ "${XDG_SESSION_TYPE:-}" = wayland ] \
+    && [ -n "${WAYLAND_DISPLAY:-}" ] \
+    && [ -r /etc/os-release ] \
+    && grep -Eq '^ID="?ubuntu"?$' /etc/os-release \
+    && grep -Eq '^VERSION_ID="?26([.][0-9]+)?"?$' /etc/os-release \
+    && [ -r /sys/class/dmi/id/product_name ] \
+    && grep -Eiq '^VMware Virtual Platform[[:space:]]*$' /sys/class/dmi/id/product_name; then
+    _enable_compat=true
+fi
+
+if [ "$_enable_compat" = true ]; then
+    [ -d "$COMPAT_GIO_MODULE_DIR" ] && [ ! -L "$COMPAT_GIO_MODULE_DIR" ] \
+        || launcher_fail '兼容模块目录缺失或权限异常，请重新运行安装器'
+    _gio_owner=$(stat -c '%u' -- "$COMPAT_GIO_MODULE_DIR" 2>/dev/null) \
+        || launcher_fail '无法读取兼容模块目录所有者'
+    _gio_mode=$(stat -c '%a' -- "$COMPAT_GIO_MODULE_DIR" 2>/dev/null) \
+        || launcher_fail '无法读取兼容模块目录权限'
+    [ "$_gio_owner" -eq 0 ] 2>/dev/null \
+        || launcher_fail '兼容模块目录不属于 root，拒绝使用'
+    printf '%s\n' "$_gio_mode" | grep -Eq '^[0-7]{3,4}$' \
+        || launcher_fail '兼容模块目录权限格式异常'
+    [ $((0$_gio_mode & 022)) -eq 0 ] \
+        || launcher_fail '兼容模块目录可被非 root 用户写入，拒绝使用'
+
+    if [ -z "${CC_SWITCH_GDK_BACKEND:-}" ]; then
+        CC_SWITCH_GDK_BACKEND=wayland
+        export CC_SWITCH_GDK_BACKEND
+    fi
+
+    # Compat=off is the explicit opt-out, so inherited empty or conflicting
+    # GIO values must not silently disable the workaround.
+    GIO_MODULE_DIR=$COMPAT_GIO_MODULE_DIR
+    GIO_USE_VFS=local
+    export GIO_MODULE_DIR GIO_USE_VFS
+
+    if [ "$CC_SWITCH_GDK_BACKEND" = wayland ]; then
+        _resolved_library=$(readlink -f -- "$HOST_WAYLAND_LIBRARY" 2>/dev/null) \
+            || launcher_fail '宿主 Wayland 库不存在，无法安全启用兼容模式'
+        case "$_resolved_library" in
+            /usr/lib/x86_64-linux-gnu/libwayland-client.so.*) ;;
+            *) launcher_fail '宿主 Wayland 库解析到非预期路径，拒绝预加载' ;;
+        esac
+        [ -f "$_resolved_library" ] && [ ! -L "$_resolved_library" ] \
+            || launcher_fail '宿主 Wayland 库目标不是普通文件，拒绝预加载'
+
+        _library_directory=${_resolved_library%/*}
+        _library_directory_owner=$(stat -c '%u' -- "$_library_directory" 2>/dev/null) \
+            || launcher_fail '无法读取宿主 Wayland 库目录所有者'
+        _library_directory_mode=$(stat -c '%a' -- "$_library_directory" 2>/dev/null) \
+            || launcher_fail '无法读取宿主 Wayland 库目录权限'
+        [ "$_library_directory_owner" -eq 0 ] 2>/dev/null \
+            || launcher_fail '宿主 Wayland 库目录不属于 root，拒绝预加载'
+        printf '%s\n' "$_library_directory_mode" | grep -Eq '^[0-7]{3,4}$' \
+            || launcher_fail '宿主 Wayland 库目录权限格式异常'
+        [ $((0$_library_directory_mode & 022)) -eq 0 ] \
+            || launcher_fail '宿主 Wayland 库目录可被非 root 用户写入，拒绝预加载'
+
+        _library_owner=$(stat -c '%u' -- "$_resolved_library" 2>/dev/null) \
+            || launcher_fail '无法读取宿主 Wayland 库所有者'
+        _library_mode=$(stat -c '%a' -- "$_resolved_library" 2>/dev/null) \
+            || launcher_fail '无法读取宿主 Wayland 库权限'
+        [ "$_library_owner" -eq 0 ] 2>/dev/null \
+            || launcher_fail '宿主 Wayland 库不属于 root，拒绝预加载'
+        printf '%s\n' "$_library_mode" | grep -Eq '^[0-7]{3,4}$' \
+            || launcher_fail '宿主 Wayland 库权限格式异常'
+        [ $((0$_library_mode & 022)) -eq 0 ] \
+            || launcher_fail '宿主 Wayland 库可被非 root 用户写入，拒绝预加载'
+
+        LD_PRELOAD=$_resolved_library
+        export LD_PRELOAD
+    fi
+fi
+
+exec "$APPIMAGE" "$@"
+LAUNCHER
+}
+
 if [ "$(id -u)" -ne 0 ]; then
     fail "本脚本需要 root 权限。无 curl 时可使用: wget -qO- https://claude.fernweh.top/ccswitch.sh | sudo sh"
 fi
 
-for _command in awk chmod chown cp grep id ln mkdir mktemp mv od rm rmdir sed stat tr uname wc; do
+for _command in awk chmod chown cp grep id ln mkdir mktemp mv od readlink rm rmdir sed stat tr uname wc; do
     require_command "$_command"
 done
 
@@ -441,6 +571,9 @@ fi
 if [ -L "$APPIMAGE_PATH" ] || { [ -e "$APPIMAGE_PATH" ] && [ ! -f "$APPIMAGE_PATH" ]; }; then
     fail "$APPIMAGE_PATH 必须是普通文件，拒绝覆盖"
 fi
+if [ -L "$LAUNCHER_PATH" ] || { [ -e "$LAUNCHER_PATH" ] && [ ! -f "$LAUNCHER_PATH" ]; }; then
+    fail "$LAUNCHER_PATH 必须是普通文件，拒绝覆盖"
+fi
 
 ensure_system_directory "$BIN_DIR" || fail "$BIN_DIR 必须是 root 所有且不可由组或其他用户写入的普通目录"
 ensure_system_directory "$DESKTOP_DIR" || fail "$DESKTOP_DIR 必须是 root 所有且不可由组或其他用户写入的普通目录"
@@ -455,6 +588,10 @@ fi
 chown root:root "$INSTALL_DIR"
 chmod 755 "$INSTALL_DIR"
 ensure_secure_parent "$INSTALL_DIR" || fail "无法加固安装目录权限"
+ensure_system_directory "$GIO_MODULE_DIR_PATH" \
+    || fail "$GIO_MODULE_DIR_PATH 必须是 root 所有且不可由组或其他用户写入的普通目录"
+chown root:root "$GIO_MODULE_DIR_PATH"
+chmod 755 "$GIO_MODULE_DIR_PATH"
 
 # Prepare every artifact before publishing. Each rename stays on one filesystem.
 STAGED_APPIMAGE=$(mktemp "$INSTALL_DIR/.cc-switch.AppImage.XXXXXX") \
@@ -463,11 +600,17 @@ cp -- "$DEST" "$STAGED_APPIMAGE"
 chown root:root "$STAGED_APPIMAGE"
 chmod 755 "$STAGED_APPIMAGE"
 
+STAGED_LAUNCHER=$(mktemp "$INSTALL_DIR/.cc-switch-launcher.XXXXXX") \
+    || fail "无法创建启动器暂存文件"
+write_launcher "$STAGED_LAUNCHER"
+chown root:root "$STAGED_LAUNCHER"
+chmod 755 "$STAGED_LAUNCHER"
+
 LINK_STAGE_DIR=$(mktemp -d "$BIN_DIR/.cc-switch-link.XXXXXX") \
     || fail "无法创建命令链接暂存目录"
 chown root:root "$LINK_STAGE_DIR"
 chmod 700 "$LINK_STAGE_DIR"
-ln -s "$APPIMAGE_PATH" "$LINK_STAGE_DIR/cc-switch"
+ln -s "$LAUNCHER_PATH" "$LINK_STAGE_DIR/cc-switch"
 chown -h root:root "$LINK_STAGE_DIR/cc-switch"
 
 STAGED_DESKTOP=$(mktemp "$DESKTOP_DIR/.cc-switch.desktop.XXXXXX") \
@@ -476,8 +619,8 @@ cat > "$STAGED_DESKTOP" <<DESKTOP
 [Desktop Entry]
 Name=CC Switch
 Comment=Claude Code / Codex / Gemini CLI provider manager
-Exec=$APPIMAGE_PATH
-TryExec=$APPIMAGE_PATH
+Exec=$LAUNCHER_PATH
+TryExec=$LAUNCHER_PATH
 Type=Application
 Categories=Development;
 Terminal=false
@@ -485,9 +628,11 @@ DESKTOP
 chown root:root "$STAGED_DESKTOP"
 chmod 644 "$STAGED_DESKTOP"
 
-printf '[INFO] 校验通过，正在原子发布 CC Switch %s\n' "$PINNED_VERSION"
+printf '[INFO] 校验通过，正在发布 CC Switch %s\n' "$PINNED_VERSION"
 mv -fT -- "$STAGED_APPIMAGE" "$APPIMAGE_PATH"
 STAGED_APPIMAGE=""
+mv -fT -- "$STAGED_LAUNCHER" "$LAUNCHER_PATH"
+STAGED_LAUNCHER=""
 mv -fT -- "$STAGED_DESKTOP" "$DESKTOP_FILE"
 STAGED_DESKTOP=""
 mv -fT -- "$LINK_STAGE_DIR/cc-switch" "$BIN_LINK"
@@ -497,6 +642,12 @@ LINK_STAGE_DIR=""
 [ -f "$APPIMAGE_PATH" ] && [ ! -L "$APPIMAGE_PATH" ] \
     && [ "$(stat -c '%u:%g:%a' -- "$APPIMAGE_PATH")" = '0:0:755' ] \
     || fail "AppImage 最终权限校验失败"
+[ -f "$LAUNCHER_PATH" ] && [ ! -L "$LAUNCHER_PATH" ] \
+    && [ "$(stat -c '%u:%g:%a' -- "$LAUNCHER_PATH")" = '0:0:755' ] \
+    || fail "启动器最终权限校验失败"
+[ -d "$GIO_MODULE_DIR_PATH" ] && [ ! -L "$GIO_MODULE_DIR_PATH" ] \
+    && [ "$(stat -c '%u:%g:%a' -- "$GIO_MODULE_DIR_PATH")" = '0:0:755' ] \
+    || fail "兼容模块目录最终权限校验失败"
 [ -f "$DESKTOP_FILE" ] && [ ! -L "$DESKTOP_FILE" ] \
     && [ "$(stat -c '%u:%g:%a' -- "$DESKTOP_FILE")" = '0:0:644' ] \
     || fail "桌面入口最终权限校验失败"
