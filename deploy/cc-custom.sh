@@ -490,14 +490,12 @@ extract_binary_from_archive() {
 # 下载并校验 Claude 二进制：官方 GCS 直链与 npmmirror 国内镜像按序回退。
 # $1=版本 $2=期望大小 $3=期望 SHA256 $4=镜像优先(true|false) $5=目标文件
 fetch_verified_binary() {
-    _fb_version="$1"; _fb_size="$2"; _fb_sha="$3"; _fb_prefer="$4"; _fb_dest="$5"
+    _fb_version="$1"; _fb_size="$2"; _fb_sha="$3"; _fb_dest="$4"
     _fb_gcs="$GCS_BUCKET/$_fb_version/$platform/claude"
     _fb_npm=$(npm_archive_url "$_fb_version" "$platform")
-    if [ "$_fb_prefer" = "true" ]; then
-        _fb_order="npm gcs"
-    else
-        _fb_order="gcs npm"
-    fi
+    # 国内镜像优先：大文件在国内网络下更快更稳（镜像二进制与官方逐字节一致，且仍强制大小/ELF/SHA256 校验）；
+    # 官方 GCS 作为兜底，仅在镜像不可用时使用，避免国内直连 GCS 大文件限速卡死。
+    _fb_order="npm gcs"
     for _fb_kind in $_fb_order; do
         if [ "$_fb_kind" = "gcs" ]; then
             _fb_url="$_fb_gcs"; _fb_label="官方 GCS 源"
@@ -651,8 +649,8 @@ if [ "$expected_size" -ge 1 ]; then
 fi
 
 echo "[INFO] 正在下载 Claude Code 二进制…"
-# 官方 GCS 直链与 npmmirror 国内镜像按序回退；固定版本兜底时镜像优先。
-fetch_verified_binary "$version" "$BINARY_LIMIT" "$checksum" "$PINNED_MODE" "$BINARY_FILE" || exit 1
+# npmmirror 国内镜像优先，官方 GCS 直链兜底；任一来源均强制大小、ELF 头与 SHA256 校验。
+fetch_verified_binary "$version" "$BINARY_LIMIT" "$checksum" "$BINARY_FILE" || exit 1
 
 secure_system_directory() {
     _directory="$1"

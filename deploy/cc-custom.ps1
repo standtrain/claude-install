@@ -608,8 +608,7 @@ function Save-ClaudeBinaryWithSources {
         [Parameter(Mandatory = $true)][string]$Platform,
         [Parameter(Mandatory = $true)][int64]$ExpectedSize,
         [Parameter(Mandatory = $true)][string]$ExpectedSha,
-        [Parameter(Mandatory = $true)][string]$Destination,
-        [Parameter(Mandatory = $true)][bool]$PreferMirror
+        [Parameter(Mandatory = $true)][string]$Destination
     )
 
     $gcsSource = [pscustomobject]@{
@@ -622,12 +621,9 @@ function Save-ClaudeBinaryWithSources {
         Name = 'npmmirror 国内镜像'
         Url  = (Get-NpmArchiveUrl -Version $Version -Platform $Platform)
     }
-    # 官方版本服务可达时优先官方源；已确认 GCS 不可达（固定版本兜底）时国内镜像优先。
-    if ($PreferMirror) {
-        $sources = @($npmSource, $gcsSource)
-    } else {
-        $sources = @($gcsSource, $npmSource)
-    }
+    # 国内镜像优先：大文件在国内网络下更快更稳（镜像二进制与官方逐字节一致，且仍强制 SHA256 校验）；
+    # 官方 GCS 作为兜底，仅在镜像不可用时使用，避免国内直连 GCS 大文件限速卡死。
+    $sources = @($npmSource, $gcsSource)
 
     $lastError = $null
     foreach ($source in $sources) {
@@ -671,7 +667,7 @@ function Install-PinnedFallback {
     try {
         Save-ClaudeBinaryWithSources -Version $PINNED_FALLBACK_VERSION -Platform $platform `
             -ExpectedSize ([int64]$fallback.Size) -ExpectedSha ([string]$fallback.Sha256) `
-            -Destination $binaryPath -PreferMirror $true
+            -Destination $binaryPath
 
         $finalPath = "$VERSIONS_DIR\$PINNED_FALLBACK_VERSION.exe"
         Publish-VerifiedBinary -SourcePath $binaryPath -DestinationPath $finalPath -ExpectedChecksum ([string]$fallback.Sha256)
@@ -1307,7 +1303,7 @@ if ($version) {
         # 官方 GCS 优先，npmmirror 国内镜像回退；任一来源下载后均强制大小与 SHA256 校验。
         Save-ClaudeBinaryWithSources -Version $version -Platform $platform `
             -ExpectedSize $expectedSize -ExpectedSha $checksum `
-            -Destination $binaryPath -PreferMirror $false
+            -Destination $binaryPath
     } catch {
         Write-Warning "[WARN] 当前版本所有下载源均失败，回退到固定版本"
         try { Remove-SafeTemporaryFile -Path $binaryPath } catch { }
