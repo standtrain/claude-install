@@ -52,22 +52,29 @@ if (-not [Environment]::Is64BitOperatingSystem) {
 }
 
 $GCS_BUCKET = "https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases"
-$ALLOWED_DOWNLOAD_HOSTS = @("storage.googleapis.com")
-$PINNED_FALLBACK_VERSION = "2.1.218"
+# 国内镜像：npmmirror（阿里云）以 npm 平台子包分发同一二进制，经离线核验与官方 GCS 逐字节一致（SHA256 相同）。
+# 镜像只承担传输，下载内容仍须匹配官方大小与 SHA256，不放宽任何完整性校验。
+$NPM_MIRROR_BASE = "https://registry.npmmirror.com"
+# 允许的下载主机：官方 GCS、npmmirror 注册表，以及注册表 302 跳转的 CDN。
+$ALLOWED_DOWNLOAD_HOSTS = @(
+    "storage.googleapis.com",
+    "registry.npmmirror.com",
+    "cdn.npmmirror.com"
+)
+# 固定兜底版本：官方版本服务（GCS）不可达时使用；大小与 SHA256 取自官方 manifest 的离线审查结果。
+$PINNED_FALLBACK_VERSION = "2.1.263"
 $PINNED_FALLBACKS = @{
     "win32-x64" = @{
-        Url = "$GCS_BUCKET/$PINNED_FALLBACK_VERSION/win32-x64/claude.exe"
-        Size = [int64]263931552
-        Sha256 = "81fcf59bb7abb558aedc6f2361f4723b3d757d28e799962d88b18b4520df66ca"
+        Size = [int64]218746016
+        Sha256 = "0b35df94c1307004f07b738390bfef8dfca5e9af29aaf6517f305bf086b95b03"
     }
     "win32-arm64" = @{
-        Url = "$GCS_BUCKET/$PINNED_FALLBACK_VERSION/win32-arm64/claude.exe"
-        Size = [int64]258307232
-        Sha256 = "a7959fd87feb9557d56f4e5752f7ed1ddf405f3bea91b2571bf93af636efd193"
+        Size = [int64]209795744
+        Sha256 = "2ca14d6f61a39c3ad5d72424f4e347d5a570a58036ab1afe14c5e3eb668e9540"
     }
 }
 
-function Assert-GcsUrl {
+function Assert-DownloadUrl {
     param([Parameter(Mandatory = $true)][string]$Url)
 
     if ($Url.Length -lt 1 -or $Url.Length -gt 2048) {
@@ -79,18 +86,51 @@ function Assert-GcsUrl {
         throw "无效的下载地址"
     }
 
-    $requiredPrefix = "/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases/"
     if (
         $uri.Scheme -cne "https" -or
         -not ($ALLOWED_DOWNLOAD_HOSTS -ccontains $uri.DnsSafeHost.ToLowerInvariant()) -or
         $uri.Port -ne 443 -or
         $uri.UserInfo.Length -ne 0 -or
         $uri.Query.Length -ne 0 -or
-        $uri.Fragment.Length -ne 0 -or
-        -not $uri.AbsolutePath.StartsWith($requiredPrefix, [StringComparison]::Ordinal)
+        $uri.Fragment.Length -ne 0
     ) {
         throw "无效的下载地址"
     }
+
+    $hostName = $uri.DnsSafeHost.ToLowerInvariant()
+    $path = $uri.AbsolutePath
+    $gcsPrefix = "/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases/"
+    # npm 平台包后缀与本脚本平台标识一致（win32-x64 / win32-arm64）；第二处用反向引用强制相同。
+    $npmPlatformGroup = 'claude-code-(win32-x64|win32-arm64)'
+    $npmPlatformSame = 'claude-code-\1'
+    $versionTail = '[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]{1,32})?'
+
+    if ($hostName -ceq "storage.googleapis.com") {
+        if (-not $path.StartsWith($gcsPrefix, [StringComparison]::Ordinal)) {
+            throw "无效的下载地址"
+        }
+        return
+    }
+
+    if ($hostName -ceq "registry.npmmirror.com") {
+        # 形如 /@anthropic-ai/claude-code-<平台>/-/claude-code-<平台>-<版本>.tgz
+        $pattern = '^/(?:@|%40)anthropic-ai/' + $npmPlatformGroup + '/-/' + $npmPlatformSame + '-' + $versionTail + '\.tgz$'
+        if ($path -cnotmatch $pattern) {
+            throw "无效的下载地址"
+        }
+        return
+    }
+
+    if ($hostName -ceq "cdn.npmmirror.com") {
+        # 注册表 302 跳转目标：/packages/%40anthropic-ai/claude-code-<平台>/<版本>/claude-code-<平台>-<版本>.tgz
+        $pattern = '^/packages/(?:@|%40)anthropic-ai/' + $npmPlatformGroup + '/' + $versionTail + '/' + $npmPlatformSame + '-' + $versionTail + '\.tgz$'
+        if ($path -cnotmatch $pattern) {
+            throw "无效的下载地址"
+        }
+        return
+    }
+
+    throw "无效的下载地址"
 }
 
 # ── 定制目录（ProgramData 全局共享） ──
@@ -287,7 +327,7 @@ function Get-HttpsResponse {
 
     $currentUrl = $Url
     for ($redirectCount = 0; $redirectCount -le 5; $redirectCount++) {
-        Assert-GcsUrl -Url $currentUrl
+        Assert-DownloadUrl -Url $currentUrl
         $request = [System.Net.HttpWebRequest]::Create($currentUrl)
         $request.Method = "GET"
         $request.AllowAutoRedirect = $false
@@ -320,7 +360,7 @@ function Get-HttpsResponse {
             catch {
                 throw "重定向地址无效"
             }
-            Assert-GcsUrl -Url $currentUrl
+            Assert-DownloadUrl -Url $currentUrl
             continue
         }
 
@@ -390,7 +430,7 @@ function Save-RemoteFile {
         [Parameter(Mandatory = $true)][int64]$ExpectedSize
     )
 
-    Assert-GcsUrl -Url $Url
+    Assert-DownloadUrl -Url $Url
     if ($ExpectedSize -lt 1 -or $ExpectedSize -gt 1GB) {
         throw "无效的预期下载大小"
     }
@@ -447,25 +487,191 @@ function Save-RemoteFile {
     }
 }
 
-function Install-PinnedFallback {
-    Write-Warning "[WARN] 最新版本不可用，回退到官方固定版本"
-    Write-Output "[INFO] 版本: $PINNED_FALLBACK_VERSION（固定版本，强制校验大小与 SHA256）"
+function Get-NpmArchiveUrl {
+    param(
+        [Parameter(Mandatory = $true)][string]$Version,
+        [Parameter(Mandatory = $true)][string]$Platform
+    )
+    # npmmirror 平台子包命名与 GCS 平台标识一致（win32-x64 / win32-arm64）。
+    return "$NPM_MIRROR_BASE/@anthropic-ai/claude-code-$Platform/-/claude-code-$Platform-$Version.tgz"
+}
 
-    $binaryPath = Join-Path $DOWNLOADS_DIR ".claude-$PINNED_FALLBACK_VERSION-$platform.$([Guid]::NewGuid().ToString('N')).part"
+function Save-RemoteArchive {
+    param(
+        [Parameter(Mandatory = $true)][string]$Url,
+        [Parameter(Mandatory = $true)][string]$Destination,
+        [Parameter(Mandatory = $true)][int64]$MaxBytes
+    )
+
+    Assert-DownloadUrl -Url $Url
+    $destinationDirectory = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($Destination))
+    Assert-SafeDirectory -Path $destinationDirectory
+    if ($null -ne (Get-Item -LiteralPath $Destination -Force -ErrorAction SilentlyContinue)) {
+        throw "归档临时文件已存在"
+    }
+
+    $response = $null
+    $inputStream = $null
+    $outputStream = $null
+    try {
+        $response = Get-HttpsResponse -Url $Url -TimeoutMs 300000
+        if ($response.ContentLength -gt $MaxBytes) {
+            throw "镜像归档超过大小上限"
+        }
+        $inputStream = $response.GetResponseStream()
+        Assert-SafeDirectory -Path $destinationDirectory
+        $outputStream = New-Object System.IO.FileStream(
+            $Destination,
+            [System.IO.FileMode]::CreateNew,
+            [System.IO.FileAccess]::Write,
+            [System.IO.FileShare]::None
+        )
+        $buffer = New-Object byte[] 65536
+        [int64]$total = 0
+        while (($read = $inputStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+            $total += $read
+            if ($total -gt $MaxBytes) {
+                throw "镜像归档超过大小上限"
+            }
+            $outputStream.Write($buffer, 0, $read)
+        }
+        $outputStream.Flush($true)
+    }
+    catch {
+        Remove-SafeTemporaryFile -Path $Destination
+        throw
+    }
+    finally {
+        if ($null -ne $outputStream) { $outputStream.Dispose() }
+        if ($null -ne $inputStream) { $inputStream.Dispose() }
+        if ($null -ne $response) { $response.Dispose() }
+    }
+}
+
+function Save-NpmArchiveBinary {
+    param(
+        [Parameter(Mandatory = $true)][string]$Url,
+        [Parameter(Mandatory = $true)][string]$Destination,
+        [Parameter(Mandatory = $true)][int64]$ExpectedSize
+    )
+
+    Assert-DownloadUrl -Url $Url
+    $destinationDirectory = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($Destination))
+    Assert-SafeDirectory -Path $destinationDirectory
+
+    $archive = "$Destination.tgz"
+    $extractDir = Join-Path $destinationDirectory (".npm-extract-" + [Guid]::NewGuid().ToString("N"))
+    try {
+        # 归档为 gzip 压缩包，体积小于二进制；用二进制预期大小作为下载上限足够宽松。
+        Save-RemoteArchive -Url $Url -Destination $archive -MaxBytes $ExpectedSize
+
+        # Windows 10 1803+ / Windows 11 自带 bsdtar（System32\tar.exe），支持解包 .tgz。
+        $tarExe = Join-Path $env:SystemRoot "System32\tar.exe"
+        if (-not (Test-Path -LiteralPath $tarExe -PathType Leaf)) {
+            throw "未找到系统 tar.exe，无法解包镜像归档"
+        }
+        New-Item -ItemType Directory -Path $extractDir -Force | Out-Null
+        # 仅解包固定成员 package/claude.exe；成员名写死，不含路径穿越字符。
+        & $tarExe -xzf $archive -C $extractDir "package/claude.exe" 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            throw "镜像归档解包失败（tar 退出码 $LASTEXITCODE）"
+        }
+        $inner = Join-Path $extractDir "package\claude.exe"
+        if (-not (Test-Path -LiteralPath $inner -PathType Leaf)) {
+            throw "镜像归档中缺少 claude.exe"
+        }
+        $innerSize = (Get-Item -LiteralPath $inner -Force).Length
+        if ($innerSize -ne $ExpectedSize) {
+            throw "解包二进制大小校验失败"
+        }
+        Move-Item -LiteralPath $inner -Destination $Destination -Force
+        [void](Assert-RegularSingleLinkFile -Path $Destination)
+        Set-ExactFileAcl -Path $Destination -AllowUsersReadExecute $true
+    }
+    catch {
+        Remove-SafeTemporaryFile -Path $Destination
+        throw
+    }
+    finally {
+        try { Remove-SafeTemporaryFile -Path $archive } catch { }
+        try {
+            if (Test-Path -LiteralPath $extractDir) {
+                Remove-Item -LiteralPath $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        } catch { }
+    }
+}
+
+function Save-ClaudeBinaryWithSources {
+    param(
+        [Parameter(Mandatory = $true)][string]$Version,
+        [Parameter(Mandatory = $true)][string]$Platform,
+        [Parameter(Mandatory = $true)][int64]$ExpectedSize,
+        [Parameter(Mandatory = $true)][string]$ExpectedSha,
+        [Parameter(Mandatory = $true)][string]$Destination,
+        [Parameter(Mandatory = $true)][bool]$PreferMirror
+    )
+
+    $gcsSource = [pscustomobject]@{
+        Kind = 'gcs'
+        Name = '官方 GCS 源'
+        Url  = "$GCS_BUCKET/$Version/$Platform/claude.exe"
+    }
+    $npmSource = [pscustomobject]@{
+        Kind = 'npm'
+        Name = 'npmmirror 国内镜像'
+        Url  = (Get-NpmArchiveUrl -Version $Version -Platform $Platform)
+    }
+    # 官方版本服务可达时优先官方源；已确认 GCS 不可达（固定版本兜底）时国内镜像优先。
+    if ($PreferMirror) {
+        $sources = @($npmSource, $gcsSource)
+    } else {
+        $sources = @($gcsSource, $npmSource)
+    }
+
+    $lastError = $null
+    foreach ($source in $sources) {
+        try {
+            Write-Output "[INFO] 尝试下载源：$($source.Name)"
+            if (Test-Path -LiteralPath $Destination) {
+                Remove-SafeTemporaryFile -Path $Destination
+            }
+            if ($source.Kind -eq 'gcs') {
+                Save-RemoteFile -Url $source.Url -Destination $Destination -ExpectedSize $ExpectedSize
+            } else {
+                Save-NpmArchiveBinary -Url $source.Url -Destination $Destination -ExpectedSize $ExpectedSize
+            }
+
+            $actualChecksum = Get-FileHashWithRetry -Path $Destination -Algorithm SHA256
+            if ($actualChecksum -cne $ExpectedSha.ToLowerInvariant()) {
+                throw "SHA256 校验失败"
+            }
+            Write-Output "[OK] 已从$($source.Name)下载，文件大小与 SHA256 校验通过"
+            return
+        }
+        catch {
+            $lastError = $_.Exception.Message
+            Write-Warning "[WARN] $($source.Name) 下载或校验失败：$lastError，尝试下一来源"
+            try { Remove-SafeTemporaryFile -Path $Destination } catch { }
+        }
+    }
+    throw "所有下载源均失败：$lastError"
+}
+
+function Install-PinnedFallback {
+    Write-Warning "[WARN] 最新版本不可用，回退到固定版本（国内镜像优先）"
     $fallback = $PINNED_FALLBACKS[$platform]
     if ($null -eq $fallback) {
         Write-Error "当前平台没有可用的固定版本"
         exit 1
     }
-    Assert-GcsUrl -Url $fallback.Url
+    Write-Output "[INFO] 版本: $PINNED_FALLBACK_VERSION（固定版本，强制校验大小与 SHA256）"
 
+    $binaryPath = Join-Path $DOWNLOADS_DIR ".claude-$PINNED_FALLBACK_VERSION-$platform.$([Guid]::NewGuid().ToString('N')).part"
     try {
-        Save-RemoteFile -Url $fallback.Url -Destination $binaryPath -ExpectedSize ([int64]$fallback.Size)
-
-        $actualChecksum = Get-FileHashWithRetry -Path $binaryPath -Algorithm SHA256
-        if ($actualChecksum -cne ([string]$fallback.Sha256).ToLowerInvariant()) {
-            throw "固定版本 SHA256 校验失败"
-        }
+        Save-ClaudeBinaryWithSources -Version $PINNED_FALLBACK_VERSION -Platform $platform `
+            -ExpectedSize ([int64]$fallback.Size) -ExpectedSha ([string]$fallback.Sha256) `
+            -Destination $binaryPath -PreferMirror $true
 
         $finalPath = "$VERSIONS_DIR\$PINNED_FALLBACK_VERSION.exe"
         Publish-VerifiedBinary -SourcePath $binaryPath -DestinationPath $finalPath -ExpectedChecksum ([string]$fallback.Sha256)
@@ -482,7 +688,7 @@ function Install-PinnedFallback {
         Write-Output "位置：$LINK_PATH"
         Write-Output "已配置系统 PATH：$BIN_DIR"
     } catch {
-        Write-Error "固定版本下载或完整性校验失败"
+        Write-Error "固定版本下载或完整性校验失败：$($_.Exception.Message)"
         try { Remove-SafeTemporaryFile -Path $binaryPath } catch { }
         exit 1
     } finally {
@@ -1098,22 +1304,15 @@ if ($version) {
     Write-Output "正在下载 Claude Code 二进制…"
 
     try {
-        $binaryUrl = "$GCS_BUCKET/$version/$platform/claude.exe"
-        Assert-GcsUrl -Url $binaryUrl
-        Save-RemoteFile -Url $binaryUrl -Destination $binaryPath -ExpectedSize $expectedSize
+        # 官方 GCS 优先，npmmirror 国内镜像回退；任一来源下载后均强制大小与 SHA256 校验。
+        Save-ClaudeBinaryWithSources -Version $version -Platform $platform `
+            -ExpectedSize $expectedSize -ExpectedSha $checksum `
+            -Destination $binaryPath -PreferMirror $false
     } catch {
-        Write-Warning "[WARN] GCS 二进制下载或大小校验失败，回退到固定版本"
+        Write-Warning "[WARN] 当前版本所有下载源均失败，回退到固定版本"
         try { Remove-SafeTemporaryFile -Path $binaryPath } catch { }
         Install-PinnedFallback
         exit 0
-    }
-
-    # SHA256 校验（带重试，应对 Defender 文件占用）
-    $actualChecksum = Get-FileHashWithRetry -Path $binaryPath -Algorithm SHA256
-    if ($actualChecksum -cne $checksum) {
-        try { Remove-SafeTemporaryFile -Path $binaryPath } catch { }
-        Write-Error "SHA256 校验失败" -ErrorAction Continue
-        exit 1
     }
 
     # ── 安装 ──
@@ -1139,8 +1338,8 @@ if ($version) {
         try { Remove-SafeTemporaryFile -Path $binaryPath } catch { }
     }
 } else {
-    # ── GCS 不可达：直接使用固定版本直链兜底 ──
-    Write-Warning "[WARN] 无法获取 GCS 版本号，使用存储桶固定版本直链"
+    # ── GCS 不可达：使用固定版本，国内镜像优先下载并强制校验 ──
+    Write-Warning "[WARN] 无法获取官方版本号，使用固定版本（国内镜像优先）"
     Install-PinnedFallback
 }
 

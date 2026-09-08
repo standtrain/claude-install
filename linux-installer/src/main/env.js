@@ -11,7 +11,7 @@ module.exports = {
   INSTALL_SCRIPT: {
     name: '安装包内置 Linux 脚本',
     relativePath: 'deploy/cc-custom.sh',
-    sha256: '433ddf293630c0300d8af6923db0cb08c214f054c3e2c5d3a8f2bca0b59d02ce',
+    sha256: '3985ffaf4ee026c0a17f4865249bbe417b26ba2e0fbb251075a645eeb35b9cc8',
   },
   CCSWITCH_SCRIPT: {
     name: '安装包内置 CC Switch 脚本',

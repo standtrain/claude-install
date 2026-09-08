@@ -37,6 +37,11 @@ else
 fi
 
 GCS_BUCKET="https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases"
+# 国内镜像：npmmirror（阿里云）npm 平台子包，二进制与官方 GCS 逐字节一致（SHA256 相同）。
+# 镜像仅承担传输，下载内容仍须匹配官方大小、ELF 头与 SHA256，不放宽任何完整性校验。
+NPM_MIRROR_BASE="https://registry.npmmirror.com"
+# 固定兜底版本：官方版本服务（GCS）不可达时使用；大小与 SHA256 取自官方 manifest 的离线审查结果。
+PINNED_VERSION="2.1.263"
 INSTALL_BASE="/opt/claude"
 VERSIONS_DIR="$INSTALL_BASE/versions"
 BIN_DIR="$INSTALL_BASE/bin"
@@ -278,35 +283,309 @@ download_file() {
     return 1
 }
 
+# ── 国内镜像（npmmirror）与固定版本兜底 ──
+
+# npmmirror 平台子包归档地址；$1=版本 $2=平台。平台标识（linux-x64 等）与 npm 包后缀一致。
+npm_archive_url() {
+    printf '%s/@anthropic-ai/claude-code-%s/-/claude-code-%s-%s.tgz\n' \
+        "$NPM_MIRROR_BASE" "$2" "$2" "$1"
+}
+
+# 固定版本的离线校验值（来源：官方 manifest），依据全局 $platform 查表。
+pinned_field() {
+    case "$platform:$1" in
+        linux-x64:size) printf '%s\n' 215662064 ;;
+        linux-x64:sha256) printf '%s\n' 26d020351e8112f4006790f3cfce43b4c9df0c1bb1d0e542364d64151b81d5ba ;;
+        linux-arm64:size) printf '%s\n' 215211432 ;;
+        linux-arm64:sha256) printf '%s\n' 7d25d7c8ae6c6e009cc7dae4e817f674179fd31fb7761bcd56fee4c2902b4c03 ;;
+        linux-x64-musl:size) printf '%s\n' 209678288 ;;
+        linux-x64-musl:sha256) printf '%s\n' b9c407e36847bcb24b953b1390f240c840ae6c99e10a76475d2fadc5d5c4adca ;;
+        linux-arm64-musl:size) printf '%s\n' 208156312 ;;
+        linux-arm64-musl:sha256) printf '%s\n' 9b02e81a61d54bef3e6d190b6f2f6c4a9c31e6e068468f79d520d5ffff6b0e42 ;;
+        *) return 1 ;;
+    esac
+}
+
+# 校验二进制/归档下载地址：官方 GCS 直链，或 npmmirror 注册表及其 302 跳转的 CDN。
+is_allowed_binary_url() {
+    _bu_url="$1"
+    [ -n "$_bu_url" ] && [ "${#_bu_url}" -le 2048 ] || return 1
+    case "$_bu_url" in
+        https://*) ;;
+        *) return 1 ;;
+    esac
+    _bu_rest=${_bu_url#https://}
+    _bu_authority=${_bu_rest%%/*}
+    [ "$_bu_rest" != "$_bu_authority" ] || return 1
+    _bu_path=/${_bu_rest#*/}
+    case "$_bu_authority" in
+        storage.googleapis.com)
+            _bu_gcs=${_bu_url#"$GCS_BUCKET"/}
+            [ "$_bu_gcs" != "$_bu_url" ] || return 1
+            printf '%s\n' "$_bu_gcs" | grep -Eq '^[A-Za-z0-9._/-]+$' || return 1
+            case "/$_bu_gcs/" in
+                *'/../'*|*'/./'*|*'//'*) return 1 ;;
+            esac
+            return 0
+            ;;
+        registry.npmmirror.com)
+            printf '%s\n' "$_bu_path" | grep -Eq "^/@anthropic-ai/claude-code-${platform}/-/claude-code-${platform}-[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9._-]{1,32})?\.tgz\$" || return 1
+            ;;
+        cdn.npmmirror.com)
+            printf '%s\n' "$_bu_path" | grep -Eq "^/packages/(%40|@)anthropic-ai/claude-code-${platform}/[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9._-]{1,32})?/claude-code-${platform}-[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9._-]{1,32})?\.tgz\$" || return 1
+            ;;
+        *) return 1 ;;
+    esac
+    printf '%s\n' "$_bu_path" | grep -Eq '^[A-Za-z0-9.%/_@-]+$' || return 1
+    case "$_bu_path" in
+        *'/../'*|*'/./'*|*'//'*) return 1 ;;
+    esac
+    return 0
+}
+
+get_http_status() {
+    awk '
+        /^[[:space:]]*HTTP\/[0-9.]+[[:space:]]+[0-9][0-9][0-9]/ { status = $2 }
+        END { if (status != "") print status }
+    ' "$1"
+}
+
+get_redirect_location() {
+    awk '
+        {
+            line = $0
+            sub(/\r$/, "", line)
+            if (line !~ /^[[:space:]]*[Ll][Oo][Cc][Aa][Tt][Ii][Oo][Nn]:/) next
+            sub(/^[[:space:]]*[Ll][Oo][Cc][Aa][Tt][Ii][Oo][Nn]:[[:space:]]*/, "", line)
+            sub(/[[:space:]]+\[[Ff][Oo][Ll][Ll][Oo][Ww][Ii][Nn][Gg]\][[:space:]]*$/, "", line)
+            sub(/[[:space:]]+$/, "", line)
+            if (line != "" && !seen[line]++) { location = line; count++ }
+        }
+        END { if (count == 1) print location; else exit 1 }
+    ' "$1"
+}
+
+# wget 不自行跟随重定向（--max-redirect=0），逐跳解析 Location 并校验白名单。
+_download_artifact_wget() {
+    _dw_url="$1"; _dw_output="$2"; _dw_max_bytes="$3"; _dw_quiet="$4"
+    _dw_hdr=$(mktemp "$TMP_DIR/wget.hdr.XXXXXX")
+    _dw_blocks=$(( (_dw_max_bytes + 511) / 512 ))
+    _dw_redirs=0
+    while :; do
+        is_allowed_binary_url "$_dw_url" || { rm -f -- "$_dw_output" "$_dw_hdr"; return 1; }
+        rm -f -- "$_dw_output"
+        _dw_ok=false
+        _dw_quiet_opt=""
+        [ "$_dw_quiet" = "true" ] && _dw_quiet_opt="-q"
+        if (
+            ulimit -c 0 || exit 1
+            ulimit -f "$_dw_blocks" || exit 1
+            wget --https-only --server-response --max-redirect=0 \
+                --connect-timeout=15 --read-timeout="$DOWNLOAD_TIMEOUT" --tries=1 \
+                $_dw_quiet_opt --output-document="$_dw_output" "$_dw_url"
+        ) > /dev/null 2> "$_dw_hdr"; then
+            _dw_ok=true
+        fi
+        case "$(get_http_status "$_dw_hdr")" in
+            200)
+                [ "$_dw_ok" = true ] && downloaded_file_within_limit "$_dw_output" "$_dw_max_bytes" \
+                    && { rm -f -- "$_dw_hdr"; return 0; }
+                rm -f -- "$_dw_output" "$_dw_hdr"; return 1
+                ;;
+            301|302|303|307|308)
+                [ "$_dw_redirs" -lt 5 ] || { rm -f -- "$_dw_output" "$_dw_hdr"; return 1; }
+                _dw_loc=$(get_redirect_location "$_dw_hdr") || { rm -f -- "$_dw_output" "$_dw_hdr"; return 1; }
+                case "$_dw_loc" in
+                    https://*) _dw_next="$_dw_loc" ;;
+                    *) _dw_next="${_dw_url%/*}/$_dw_loc" ;;
+                esac
+                is_allowed_binary_url "$_dw_next" || { rm -f -- "$_dw_output" "$_dw_hdr"; return 1; }
+                _dw_url="$_dw_next"
+                _dw_redirs=$(( _dw_redirs + 1 ))
+                ;;
+            *)
+                rm -f -- "$_dw_output" "$_dw_hdr"; return 1
+                ;;
+        esac
+    done
+}
+
+# 下载二进制或归档到文件；与 download_file 不同，本函数支持 npmmirror 的 302 跳转。
+download_artifact() {
+    _da_url="$1"; _da_output="$2"; _da_max_bytes="$3"; _da_quiet="${4:-false}"
+    is_allowed_binary_url "$_da_url" || { echo "[ERROR] 下载地址不在允许范围" >&2; return 1; }
+    printf '%s\n' "$_da_max_bytes" | grep -Eq '^[0-9]{1,10}$' || return 1
+    [ "$_da_max_bytes" -gt 0 ] && [ "$_da_max_bytes" -le "$MAX_BINARY_BYTES" ] || return 1
+    _da_blocks=$(( (_da_max_bytes + 511) / 512 ))
+    _da_attempt=1
+    while [ "$_da_attempt" -le 3 ]; do
+        rm -f -- "$_da_output"
+        if [ "$DOWNLOADER" = "curl" ]; then
+            _da_eff=$(mktemp "$TMP_DIR/eff.XXXXXX")
+            _da_ok=false
+            if [ "$_da_quiet" = "true" ]; then
+                if (
+                    ulimit -c 0 || exit 1
+                    ulimit -f "$_da_blocks" || exit 1
+                    curl -fsSL --proto '=https' --proto-redir '=https' --tlsv1.2 \
+                        --connect-timeout 15 --max-time "$DOWNLOAD_TIMEOUT" --retry 2 --retry-delay 1 \
+                        --max-redirs 5 --max-filesize "$_da_max_bytes" \
+                        -o "$_da_output" --write-out '%{url_effective}' "$_da_url"
+                ) > "$_da_eff" 2>/dev/null; then
+                    _da_ok=true
+                fi
+            else
+                if (
+                    ulimit -c 0 || exit 1
+                    ulimit -f "$_da_blocks" || exit 1
+                    curl -fL --proto '=https' --proto-redir '=https' --tlsv1.2 \
+                        --connect-timeout 15 --max-time "$DOWNLOAD_TIMEOUT" --retry 2 --retry-delay 1 \
+                        --max-redirs 5 --max-filesize "$_da_max_bytes" --progress-bar \
+                        -o "$_da_output" --write-out '%{url_effective}' "$_da_url"
+                ) > "$_da_eff"; then
+                    _da_ok=true
+                fi
+            fi
+            if [ "$_da_ok" = true ] \
+                && is_allowed_binary_url "$(tr -d '[:space:]' < "$_da_eff")" \
+                && downloaded_file_within_limit "$_da_output" "$_da_max_bytes"; then
+                rm -f -- "$_da_eff"
+                return 0
+            fi
+            rm -f -- "$_da_eff"
+        else
+            if _download_artifact_wget "$_da_url" "$_da_output" "$_da_max_bytes" "$_da_quiet"; then
+                return 0
+            fi
+        fi
+        echo "[WARN] 下载失败（第 $_da_attempt/3 次）" >&2
+        _da_attempt=$(( _da_attempt + 1 ))
+    done
+    rm -f -- "$_da_output"
+    return 1
+}
+
+# 从 npmmirror .tgz 归档中提取固定成员 package/claude 到目标文件。
+extract_binary_from_archive() {
+    _eb_archive="$1"; _eb_dest="$2"
+    command -v tar >/dev/null 2>&1 || { echo "[ERROR] 缺少 tar，无法解包镜像归档" >&2; return 1; }
+    _eb_dir=$(mktemp -d "$TMP_DIR/extract.XXXXXX")
+    # 仅提取写死的成员 package/claude，成员名不含路径穿越字符。
+    if ! tar -xzf "$_eb_archive" -C "$_eb_dir" package/claude 2>/dev/null; then
+        rm -rf -- "$_eb_dir"
+        echo "[ERROR] 镜像归档解包失败" >&2
+        return 1
+    fi
+    _eb_inner="$_eb_dir/package/claude"
+    if [ ! -f "$_eb_inner" ] || [ -L "$_eb_inner" ]; then
+        rm -rf -- "$_eb_dir"
+        echo "[ERROR] 镜像归档中缺少二进制" >&2
+        return 1
+    fi
+    mv -f -- "$_eb_inner" "$_eb_dest"
+    rm -rf -- "$_eb_dir"
+    return 0
+}
+
+# 下载并校验 Claude 二进制：官方 GCS 直链与 npmmirror 国内镜像按序回退。
+# $1=版本 $2=期望大小 $3=期望 SHA256 $4=镜像优先(true|false) $5=目标文件
+fetch_verified_binary() {
+    _fb_version="$1"; _fb_size="$2"; _fb_sha="$3"; _fb_prefer="$4"; _fb_dest="$5"
+    _fb_gcs="$GCS_BUCKET/$_fb_version/$platform/claude"
+    _fb_npm=$(npm_archive_url "$_fb_version" "$platform")
+    if [ "$_fb_prefer" = "true" ]; then
+        _fb_order="npm gcs"
+    else
+        _fb_order="gcs npm"
+    fi
+    for _fb_kind in $_fb_order; do
+        if [ "$_fb_kind" = "gcs" ]; then
+            _fb_url="$_fb_gcs"; _fb_label="官方 GCS 源"
+        else
+            _fb_url="$_fb_npm"; _fb_label="npmmirror 国内镜像"
+        fi
+        echo "[INFO] 尝试下载源：$_fb_label"
+        rm -f -- "$_fb_dest"
+        if [ "$_fb_kind" = "gcs" ]; then
+            if ! download_file "$_fb_url" "$_fb_dest" false "$_fb_size"; then
+                echo "[WARN] 该源下载失败，尝试下一个来源" >&2
+                continue
+            fi
+        else
+            _fb_arch="$TMP_DIR/claude-archive.$$.tgz"
+            rm -f -- "$_fb_arch"
+            # 归档为 gzip 压缩包，体积小于二进制；用二进制期望大小作为下载上限足够宽松。
+            if download_artifact "$_fb_url" "$_fb_arch" "$_fb_size" true \
+                && extract_binary_from_archive "$_fb_arch" "$_fb_dest"; then
+                rm -f -- "$_fb_arch"
+            else
+                echo "[WARN] 镜像源下载或解包失败，尝试下一个来源" >&2
+                rm -f -- "$_fb_arch"; rm -f -- "$_fb_dest"
+                continue
+            fi
+        fi
+
+        _fb_actual_size=$(wc -c < "$_fb_dest" | tr -d '[:space:]')
+        if [ "$_fb_actual_size" -gt "$MAX_BINARY_BYTES" ]; then
+            echo "[ERROR] 二进制超过大小限制" >&2
+            rm -f -- "$_fb_dest"; continue
+        fi
+        if [ "$_fb_size" -gt 0 ] && [ "$_fb_actual_size" -ne "$_fb_size" ]; then
+            echo "[WARN] 文件大小校验失败（期望 $_fb_size，实际 $_fb_actual_size），尝试下一个来源" >&2
+            rm -f -- "$_fb_dest"; continue
+        fi
+        _fb_magic=$(od -An -tx1 -N4 "$_fb_dest" 2>/dev/null | tr -d ' \n')
+        if [ "$_fb_magic" != "7f454c46" ]; then
+            echo "[WARN] 下载内容不是有效 ELF 文件，尝试下一个来源" >&2
+            rm -f -- "$_fb_dest"; continue
+        fi
+        if command -v sha256sum >/dev/null 2>&1; then
+            _fb_actual_sha=$(sha256sum "$_fb_dest" | cut -d ' ' -f 1)
+        elif command -v shasum >/dev/null 2>&1; then
+            _fb_actual_sha=$(shasum -a 256 "$_fb_dest" | cut -d ' ' -f 1)
+        else
+            echo "[ERROR] 缺少 sha256sum 或 shasum，无法验证安装包" >&2
+            return 1
+        fi
+        if [ "$_fb_actual_sha" != "$_fb_sha" ]; then
+            echo "[WARN] SHA256 校验失败，尝试下一个来源" >&2
+            rm -f -- "$_fb_dest"; continue
+        fi
+        echo "[OK] 文件大小、ELF 头和 SHA256 校验通过（来源：$_fb_label）"
+        return 0
+    done
+    echo "[ERROR] 所有下载源均失败或校验未通过，未修改现有安装" >&2
+    return 1
+}
+
+# PINNED_MODE=true 表示官方版本服务不可达，改用脚本内置固定版本（国内镜像优先）。
+PINNED_MODE=false
+checksum=""
+expected_size=0
+
 if [ "$TARGET" = "latest" ] || [ "$TARGET" = "stable" ]; then
     echo "[INFO] 获取 Claude Code 最新版本…"
-    download_file "$GCS_BUCKET/latest" "$VERSION_FILE" true 128 || {
-        echo "[ERROR] 无法访问官方版本服务，未修改现有安装" >&2
-        exit 1
-    }
-    [ "$(wc -c < "$VERSION_FILE" | tr -d ' ')" -le 128 ] || {
-        echo "[ERROR] 版本响应超过大小限制" >&2
-        exit 1
-    }
-    version=$(tr -d '[:space:]' < "$VERSION_FILE")
+    version=""
+    if download_file "$GCS_BUCKET/latest" "$VERSION_FILE" true 128 \
+        && [ "$(wc -c < "$VERSION_FILE" | tr -d ' ')" -le 128 ]; then
+        version=$(tr -d '[:space:]' < "$VERSION_FILE")
+    fi
+    if ! printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9._-]{1,32})?$' \
+        || [ "${#version}" -gt 64 ]; then
+        echo "[WARN] 无法访问官方版本服务，改用国内镜像固定版本 $PINNED_VERSION" >&2
+        version="$PINNED_VERSION"
+        PINNED_MODE=true
+    fi
 else
     version="$TARGET"
+    printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9._-]{1,32})?$' || {
+        echo "[ERROR] 版本号格式无效" >&2
+        exit 1
+    }
+    [ "${#version}" -le 64 ] || { echo "[ERROR] 版本号过长" >&2; exit 1; }
 fi
-printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9._-]{1,32})?$' || {
-    echo "[ERROR] 版本号格式无效" >&2
-    exit 1
-}
-[ "${#version}" -le 64 ] || { echo "[ERROR] 版本号过长" >&2; exit 1; }
 
-echo "[INFO] 版本: $version，平台: $platform，下载器: $DOWNLOADER"
-download_file "$GCS_BUCKET/$version/manifest.json" "$MANIFEST_FILE" true 1048576 || {
-    echo "[ERROR] 获取官方 manifest 失败，未修改现有安装" >&2
-    exit 1
-}
-[ "$(wc -c < "$MANIFEST_FILE" | tr -d ' ')" -le 1048576 ] || {
-    echo "[ERROR] manifest 超过 1 MB 大小限制" >&2
-    exit 1
-}
+# manifest 的下载与解析在 parse_manifest 定义之后进行，失败时回退固定版本。
 
 parse_manifest() {
     if command -v python3 >/dev/null 2>&1; then
@@ -339,49 +618,41 @@ PY
     fi
     [ "$(wc -l < "$META_FILE" | tr -d ' ')" -eq 2 ]
 }
-parse_manifest || { echo "[ERROR] manifest 缺少当前平台元数据" >&2; exit 1; }
-checksum=$(sed -n '1p' "$META_FILE" | tr 'A-F' 'a-f')
-expected_size=$(sed -n '2p' "$META_FILE")
-[ "${#checksum}" -eq 64 ] && ! printf '%s' "$checksum" | grep -Eq '[^a-f0-9]' || {
-    echo "[ERROR] manifest checksum 格式无效" >&2
-    exit 1
-}
-printf '%s\n' "$expected_size" | grep -Eq '^[0-9]{1,10}$' || {
-    echo "[ERROR] manifest size 格式无效" >&2
-    exit 1
-}
-[ "$expected_size" -le "$MAX_BINARY_BYTES" ] || {
-    echo "[ERROR] manifest 声明的文件大小超过限制" >&2
-    exit 1
-}
+if [ "$PINNED_MODE" != "true" ]; then
+    echo "[INFO] 版本: $version，平台: $platform，下载器: $DOWNLOADER"
+    manifest_ok=false
+    if download_file "$GCS_BUCKET/$version/manifest.json" "$MANIFEST_FILE" true 1048576 \
+        && [ "$(wc -c < "$MANIFEST_FILE" | tr -d ' ')" -le 1048576 ] \
+        && parse_manifest; then
+        checksum=$(sed -n '1p' "$META_FILE" | tr 'A-F' 'a-f')
+        expected_size=$(sed -n '2p' "$META_FILE")
+        if [ "${#checksum}" -eq 64 ] && ! printf '%s' "$checksum" | grep -Eq '[^a-f0-9]' \
+            && printf '%s\n' "$expected_size" | grep -Eq '^[0-9]{1,10}$' \
+            && [ "$expected_size" -ge 1 ] && [ "$expected_size" -le "$MAX_BINARY_BYTES" ]; then
+            manifest_ok=true
+        fi
+    fi
+    if [ "$manifest_ok" != "true" ]; then
+        echo "[WARN] 获取官方 manifest 失败，改用国内镜像固定版本 $PINNED_VERSION" >&2
+        version="$PINNED_VERSION"
+        PINNED_MODE=true
+    fi
+fi
+
+if [ "$PINNED_MODE" = "true" ]; then
+    checksum=$(pinned_field sha256) || { echo "[ERROR] 当前平台没有可用的固定版本" >&2; exit 1; }
+    expected_size=$(pinned_field size) || { echo "[ERROR] 当前平台没有可用的固定版本" >&2; exit 1; }
+    echo "[INFO] 固定版本: $version，平台: $platform，下载器: $DOWNLOADER（国内镜像优先，强制校验大小与 SHA256）"
+fi
+
 BINARY_LIMIT="$MAX_BINARY_BYTES"
-if [ "$expected_size" -gt 0 ]; then
+if [ "$expected_size" -ge 1 ]; then
     BINARY_LIMIT="$expected_size"
 fi
 
 echo "[INFO] 正在下载 Claude Code 二进制…"
-download_file "$GCS_BUCKET/$version/$platform/claude" "$BINARY_FILE" false "$BINARY_LIMIT" || {
-    echo "[ERROR] 官方二进制下载失败，未修改现有安装" >&2
-    exit 1
-}
-actual_size=$(wc -c < "$BINARY_FILE" | tr -d ' ')
-[ "$actual_size" -le "$MAX_BINARY_BYTES" ] || { echo "[ERROR] 二进制超过大小限制" >&2; exit 1; }
-if [ "$expected_size" -gt 0 ] && [ "$actual_size" -ne "$expected_size" ]; then
-    echo "[ERROR] 文件大小校验失败" >&2
-    exit 1
-fi
-magic=$(od -An -tx1 -N4 "$BINARY_FILE" 2>/dev/null | tr -d ' \n')
-[ "$magic" = "7f454c46" ] || { echo "[ERROR] 下载内容不是有效 ELF 文件" >&2; exit 1; }
-if command -v sha256sum >/dev/null 2>&1; then
-    actual_checksum=$(sha256sum "$BINARY_FILE" | cut -d ' ' -f 1)
-elif command -v shasum >/dev/null 2>&1; then
-    actual_checksum=$(shasum -a 256 "$BINARY_FILE" | cut -d ' ' -f 1)
-else
-    echo "[ERROR] 缺少 sha256sum 或 shasum，无法验证安装包" >&2
-    exit 1
-fi
-[ "$actual_checksum" = "$checksum" ] || { echo "[ERROR] SHA256 校验失败" >&2; exit 1; }
-echo "[OK] 文件大小、ELF 头和 SHA256 校验通过"
+# 官方 GCS 直链与 npmmirror 国内镜像按序回退；固定版本兜底时镜像优先。
+fetch_verified_binary "$version" "$BINARY_LIMIT" "$checksum" "$PINNED_MODE" "$BINARY_FILE" || exit 1
 
 secure_system_directory() {
     _directory="$1"

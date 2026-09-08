@@ -138,7 +138,7 @@ sudo install -o root -g caddy -m 640 cc-custom.ps1 cc-custom.sh ccswitch.ps1 ccs
 ## 网络与安全要求
 
 - 发布站点必须启用 HTTPS，不提供 HTTP 降级入口。
-- Claude CLI 脚本需要访问 `storage.googleapis.com`；CC Switch 脚本只访问固定 GitHub Release、GitHub Release Assets 及脚本内允许的 HTTPS 传输镜像。
+- Claude CLI 脚本访问 `storage.googleapis.com`（官方 GCS，提供版本号、manifest 与二进制直链）以及 `registry.npmmirror.com` / `cdn.npmmirror.com`（npmmirror 国内镜像，仅承担传输，下载内容仍须通过大小、ELF/文件头与 SHA256 校验）；CC Switch 脚本只访问固定 GitHub Release、GitHub Release Assets 及脚本内允许的 HTTPS 传输镜像。
 - 不要在脚本、Caddy/Nginx 配置或示例中写入密码、令牌、私有地址等敏感信息。
 - `.claude.json` 和安装器生成的配置备份固定为 `600`，仅目标用户可读写；部署服务不得读取用户配置。
 - 安装需要 root 或管理员权限，但安装后的 CLI/GUI 应由普通用户运行。
