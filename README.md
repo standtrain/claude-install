@@ -25,21 +25,21 @@
 推荐下载 `.AppImage.tar.gz` 归档（已保留可执行权限）：
 
 ```bash
-tar -xzf ClaudeCLIInstaller-Linux-0.3.4-x86_64.AppImage.tar.gz
-./ClaudeCLIInstaller-Linux-0.3.4-x86_64.AppImage
+tar -xzf ClaudeCLIInstaller-Linux-0.3.5-x86_64.AppImage.tar.gz
+./ClaudeCLIInstaller-Linux-0.3.5-x86_64.AppImage
 ```
 
 直接下载 `.AppImage` 时需要手动添加权限；不要使用 root 运行图形界面：
 
 ```bash
-chmod 755 ClaudeCLIInstaller-Linux-0.3.4-x86_64.AppImage
-./ClaudeCLIInstaller-Linux-0.3.4-x86_64.AppImage
+chmod 755 ClaudeCLIInstaller-Linux-0.3.5-x86_64.AppImage
+./ClaudeCLIInstaller-Linux-0.3.5-x86_64.AppImage
 ```
 
 若系统未安装 FUSE 2，可使用 AppImage 自带的解包运行模式：
 
 ```bash
-APPIMAGE_EXTRACT_AND_RUN=1 ./ClaudeCLIInstaller-Linux-0.3.4-x86_64.AppImage
+APPIMAGE_EXTRACT_AND_RUN=1 ./ClaudeCLIInstaller-Linux-0.3.5-x86_64.AppImage
 ```
 
 ------

@@ -1,6 +1,6 @@
 {
   "name": "claude-cli-portable-installer",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "Claude CLI 便携式安装器：一键完成 Git Bash、Claude CLI、.claude.json、系统 PATH 配置",
   "private": true,
   "main": "src/main/main.js",
