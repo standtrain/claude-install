@@ -9,6 +9,7 @@ const config = require('./configWriter');
 const pathMgr = require('./pathManager');
 const logger = require('../logger');
 const env = require('../env');
+const path = require('path');
 const { execFile } = require('child_process');
 const { createAbortController } = require('./downloader');
 const { EXECUTABLES, systemOptions } = require('./windowsSystem');
@@ -80,31 +81,45 @@ class Installer {
         logger.info(this.opts.installGit ? 'Git 已安装，跳过' : '用户选择跳过 Git 安装');
       }
 
-      // ── ③ Claude CLI 安装 ──
-      this.checkCancel();
-      logger.setStep(STEPS.CLAUDE, 'active');
-      logger.info(`安装方式：${env.INSTALL_SCRIPT.name}`);
-      logger.progress(STEPS.CLAUDE, 0, '开始执行内置 Claude 安装脚本…');
-      await claude.install(env.INSTALL_SCRIPT, this);
-      logger.progress(STEPS.CLAUDE, 100);
-      logger.setStep(STEPS.CLAUDE, 'done');
+      // 本次实际要校验的 claude 可执行文件：新装用安装目录，已装则用探测到的现有路径。
+      const claudeExecutable = state.claude.installed && state.claude.location
+        ? state.claude.location
+        : path.join(env.INSTALL_BIN_DIR, 'claude.exe');
 
-      // ── ④ 验证 .claude.json ──
+      // ── ③ Claude CLI 安装（已安装则跳过，便于只补装 Git）──
       this.checkCancel();
-      logger.setStep(STEPS.CONFIG, 'active');
-      config.verify();
-      logger.progress(STEPS.CONFIG, 100);
-      logger.setStep(STEPS.CONFIG, 'done');
+      if (state.claude.installed) {
+        logger.info(`Claude CLI 已安装（${state.claude.location}），跳过`);
+        logger.setStep(STEPS.CLAUDE, 'skipped');
+        // 本次未改动 Claude，配置与 PATH 由其原有安装方式负责，无需重复校验。
+        logger.setStep(STEPS.CONFIG, 'skipped');
+        logger.setStep(STEPS.PATH, 'skipped');
+        logger.progress(STEPS.CLAUDE, 100);
+      } else {
+        logger.setStep(STEPS.CLAUDE, 'active');
+        logger.info(`安装方式：${env.INSTALL_SCRIPT.name}`);
+        logger.progress(STEPS.CLAUDE, 0, '开始执行内置 Claude 安装脚本…');
+        await claude.install(env.INSTALL_SCRIPT, this);
+        logger.progress(STEPS.CLAUDE, 100);
+        logger.setStep(STEPS.CLAUDE, 'done');
 
-      // ── ⑤ 验证系统 PATH ──
-      this.checkCancel();
-      logger.setStep(STEPS.PATH, 'active');
-      await pathMgr.verifyBinInPath();
-      logger.progress(STEPS.PATH, 100);
-      logger.setStep(STEPS.PATH, 'done');
+        // ── ④ 验证 .claude.json ──
+        this.checkCancel();
+        logger.setStep(STEPS.CONFIG, 'active');
+        config.verify();
+        logger.progress(STEPS.CONFIG, 100);
+        logger.setStep(STEPS.CONFIG, 'done');
+
+        // ── ⑤ 验证系统 PATH ──
+        this.checkCancel();
+        logger.setStep(STEPS.PATH, 'active');
+        await pathMgr.verifyBinInPath();
+        logger.progress(STEPS.PATH, 100);
+        logger.setStep(STEPS.PATH, 'done');
+      }
 
       // ── ⑥ 完成 ──
-      await this.finalCheck();
+      await this.finalCheck(claudeExecutable);
       logger.setStep(STEPS.DONE, 'done');
       logger.ok('✅ 安装完成');
     } catch (e) {
@@ -120,9 +135,9 @@ class Installer {
     }
   }
 
-  async finalCheck() {
+  async finalCheck(executable) {
     return new Promise((resolve, reject) => {
-      execFile(require('path').join(env.INSTALL_BIN_DIR, 'claude.exe'), ['--version'],
+      execFile(executable || path.join(env.INSTALL_BIN_DIR, 'claude.exe'), ['--version'],
         systemOptions({ timeout: 10000, maxBuffer: 4096 }), (err, stdout) => {
           const version = String(stdout || '').split(/\r?\n/, 1)[0]
             .replace(/[^\x20-\x7e]/g, '').trim().slice(0, 256);

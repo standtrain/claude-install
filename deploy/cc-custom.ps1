@@ -31,7 +31,7 @@ function Assert-Administrator {
     try {
         $principal = New-Object Security.Principal.WindowsPrincipal($identity)
         if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-            throw "[ERROR] 需要管理员权限。请以管理员身份打开 PowerShell 后重新执行安装命令。"
+            throw "需要管理员权限。请以管理员身份打开 PowerShell 后重新执行安装命令。"
         }
     }
     finally {
@@ -679,7 +679,7 @@ function Save-ClaudeBinaryWithSources {
     $lastError = $null
     foreach ($source in $sources) {
         try {
-            Write-Output "[INFO] 尝试下载源：$($source.Name)"
+            Write-Output "尝试下载源：$($source.Name)"
             if (Test-Path -LiteralPath $Destination) {
                 Remove-SafeTemporaryFile -Path $Destination
             }
@@ -693,12 +693,12 @@ function Save-ClaudeBinaryWithSources {
             if ($actualChecksum -cne $ExpectedSha.ToLowerInvariant()) {
                 throw "SHA256 校验失败"
             }
-            Write-Output "[OK] 已从$($source.Name)下载，文件大小与 SHA256 校验通过"
+            Write-Output "已从$($source.Name)下载，文件大小与 SHA256 校验通过"
             return
         }
         catch {
             $lastError = $_.Exception.Message
-            Write-Warning "[WARN] $($source.Name) 下载或校验失败：$lastError，尝试下一来源"
+            [Console]::Error.WriteLine("$($source.Name) 下载或校验失败：$lastError，尝试下一来源")
             try { Remove-SafeTemporaryFile -Path $Destination } catch { }
         }
     }
@@ -709,7 +709,13 @@ function Save-ClaudeBinaryWithSources {
 # 且文件大小与 SHA256 与当前平台固定版本完全一致时才复制使用；任何不匹配一律拒绝。
 # 安全锚点是 SHA256：即使路径异常，内容哈希不符也不会安装。
 function Try-CopyBundledBinary {
-    param([Parameter(Mandatory = $true)][string]$Destination)
+    param(
+        [Parameter(Mandatory = $true)][string]$Destination,
+        # 可选的期望值：动态版本用 manifest 的大小/SHA256 与内置副本比对；
+        # 不传时使用当前平台固定版本 pin（固定版本兜底路径）。
+        [int64]$ExpectedSize = 0,
+        [string]$ExpectedSha = ""
+    )
 
     $bundled = [string]$env:CLAUDE_BUNDLED_BINARY
     if ([string]::IsNullOrWhiteSpace($bundled) -or $bundled.Length -gt 32767) { return $false }
@@ -724,15 +730,20 @@ function Try-CopyBundledBinary {
     $fallback = $PINNED_FALLBACKS[$platform]
     if ($null -eq $fallback) { return $false }
 
+    [int64]$wantSize = [int64]$fallback.Size
+    if ($ExpectedSize -gt 0) { $wantSize = $ExpectedSize }
+    [string]$wantSha = ([string]$fallback.Sha256).ToLowerInvariant()
+    if ($ExpectedSha -match '^[0-9a-fA-F]{64}$') { $wantSha = $ExpectedSha.ToLowerInvariant() }
+
     $item = Get-Item -LiteralPath $full -Force -ErrorAction SilentlyContinue
     if ($null -eq $item -or -not ($item -is [System.IO.FileInfo]) `
         -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
         return $false
     }
-    if ($item.Length -ne [int64]$fallback.Size) { return $false }
+    if ($item.Length -ne $wantSize) { return $false }
 
     $actual = Get-FileHashWithRetry -Path $full -Algorithm SHA256
-    if ($actual -cne ([string]$fallback.Sha256).ToLowerInvariant()) { return $false }
+    if ($actual -cne $wantSha) { return $false }
 
     if (Test-Path -LiteralPath $Destination) { Remove-SafeTemporaryFile -Path $Destination }
     Copy-Item -LiteralPath $full -Destination $Destination -Force
@@ -742,20 +753,20 @@ function Try-CopyBundledBinary {
 }
 
 function Install-PinnedFallback {
-    Write-Warning "[WARN] 最新版本不可用，回退到固定版本（官方源优先，低速自动切镜像）"
+    # 回退原因由各调用方输出，这里不再重复；仅报告实际使用的固定版本。
     $fallback = $PINNED_FALLBACKS[$platform]
     if ($null -eq $fallback) {
         Write-Error "当前平台没有可用的固定版本"
         exit 1
     }
-    Write-Output "[INFO] 版本: $PINNED_FALLBACK_VERSION（固定版本，强制校验大小与 SHA256）"
+    Write-Output "使用固定版本 $PINNED_FALLBACK_VERSION（强制校验大小与 SHA256）"
 
     $binaryPath = Join-Path $DOWNLOADS_DIR ".claude-$PINNED_FALLBACK_VERSION-$platform.$([Guid]::NewGuid().ToString('N')).part"
     try {
         # 进入固定版本兜底意味着官方版本服务已不可达；内置副本与固定版本同版本、同哈希，
         # 优先直接使用本地内置版本，避免在慢/断网络上空等下载。
         if (Try-CopyBundledBinary -Destination $binaryPath) {
-            Write-Output "[INFO] 使用安装包内置离线版本 $PINNED_FALLBACK_VERSION（已通过大小与 SHA256 校验），跳过网络下载"
+            Write-Output "使用安装包内置离线版本 $PINNED_FALLBACK_VERSION（已通过大小与 SHA256 校验），跳过网络下载"
         } else {
             # 无内置副本（如 ARM64 或远程脚本）时才走网络：官方源优先、低速切镜像。
             try {
@@ -764,9 +775,9 @@ function Install-PinnedFallback {
                     -Destination $binaryPath
             } catch {
                 # 官方源与国内镜像均失败（含低速中止）时，最后再尝试安装包内置离线二进制。
-                Write-Warning "[WARN] 网络下载源均失败：$($_.Exception.Message)"
+                [Console]::Error.WriteLine("网络下载源均失败：$($_.Exception.Message)")
                 if (-not (Try-CopyBundledBinary -Destination $binaryPath)) { throw }
-                Write-Warning "[WARN] 已改用安装包内置离线版本 $PINNED_FALLBACK_VERSION"
+                [Console]::Error.WriteLine("已改用安装包内置离线版本 $PINNED_FALLBACK_VERSION")
             }
         }
 
@@ -816,7 +827,7 @@ public static extern IntPtr SendMessageTimeout(IntPtr hWnd, int Msg, IntPtr wPar
         [IntPtr]$r = [IntPtr]::Zero
         [void]$type::SendMessageTimeout([IntPtr]0xffff, 0x1A, [IntPtr]::Zero, "Environment", 2, 5000, [ref]$r)
     } catch {
-        Write-Warning "PATH 广播失败（下次登录会自动生效）"
+        [Console]::Error.WriteLine("PATH 广播失败（下次登录会自动生效）")
     }
 }
 
@@ -1357,14 +1368,14 @@ if ($Target -in @("latest", "stable")) {
     try {
         $version = (Get-RemoteText -Url "$GCS_BUCKET/latest" -MaxBytes 128).ToString().Trim()
     } catch {
-        Write-Warning "[WARN] 无法获取 GCS 版本号"
+        [Console]::Error.WriteLine("无法获取 GCS 版本号")
     }
 } else {
     $version = $Target
 }
 
 if ($version -and ($version.Length -gt 48 -or $version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]{1,32})?$')) {
-    Write-Warning "[WARN] 版本号格式无效，将使用固定版本"
+    [Console]::Error.WriteLine("版本号格式无效，将使用固定版本")
     $version = $null
 }
 
@@ -1385,12 +1396,12 @@ if ($version) {
             $expectedSize -lt 1MB -or
             $expectedSize -gt 1GB
         ) {
-            Write-Warning "[WARN] manifest 中未包含平台 $platform，回退到固定版本"
+            [Console]::Error.WriteLine("manifest 中未包含平台 $platform，回退到固定版本")
             Install-PinnedFallback
             exit 0
         }
     } catch {
-        Write-Warning "[WARN] 获取 manifest 失败，回退到固定版本"
+        [Console]::Error.WriteLine("获取 manifest 失败，回退到固定版本")
         Install-PinnedFallback
         exit 0
     }
@@ -1398,18 +1409,25 @@ if ($version) {
     $binaryPath = Join-Path $DOWNLOADS_DIR ".claude-$version-$platform.$([Guid]::NewGuid().ToString('N')).part"
     Write-Output "Claude Code 版本：$version"
     Write-Output "平台：$platform"
-    Write-Output "正在下载 Claude Code 二进制…"
 
-    try {
-        # 官方 GCS 优先，npmmirror 国内镜像回退；任一来源下载后均强制大小与 SHA256 校验。
-        Save-ClaudeBinaryWithSources -Version $version -Platform $platform `
-            -ExpectedSize $expectedSize -ExpectedSha $checksum `
-            -Destination $binaryPath
-    } catch {
-        Write-Warning "[WARN] 当前版本所有下载源均失败，回退到固定版本"
-        try { Remove-SafeTemporaryFile -Path $binaryPath } catch { }
-        Install-PinnedFallback
-        exit 0
+    # 安装包内置副本若与目标版本（manifest 的大小/SHA256）一致，直接本地安装，零网络等待。
+    $usedBundled = Try-CopyBundledBinary -Destination $binaryPath `
+        -ExpectedSize $expectedSize -ExpectedSha $checksum
+    if ($usedBundled) {
+        Write-Output "安装包内置版本与目标版本 $version 一致，直接使用（无需联网下载）"
+    } else {
+        Write-Output "正在下载 Claude Code 二进制…"
+        try {
+            # 官方 GCS 优先，npmmirror 国内镜像回退；任一来源下载后均强制大小与 SHA256 校验。
+            Save-ClaudeBinaryWithSources -Version $version -Platform $platform `
+                -ExpectedSize $expectedSize -ExpectedSha $checksum `
+                -Destination $binaryPath
+        } catch {
+            [Console]::Error.WriteLine("当前版本所有下载源均失败，回退到固定版本")
+            try { Remove-SafeTemporaryFile -Path $binaryPath } catch { }
+            Install-PinnedFallback
+            exit 0
+        }
     }
 
     # ── 安装 ──
@@ -1435,8 +1453,8 @@ if ($version) {
         try { Remove-SafeTemporaryFile -Path $binaryPath } catch { }
     }
 } else {
-    # ── GCS 版本服务不可达：使用固定版本，官方源优先、低速自动切镜像并强制校验 ──
-    Write-Warning "[WARN] 无法获取官方版本号，使用固定版本（官方源优先，低速自动切镜像）"
+    # ── GCS 版本服务不可达：改用固定版本（优先安装包内置离线副本，否则官方源/镜像）──
+    [Console]::Error.WriteLine("无法获取官方版本号，改用固定版本 $PINNED_FALLBACK_VERSION")
     Install-PinnedFallback
 }
 

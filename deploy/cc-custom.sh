@@ -18,11 +18,11 @@ case "$TARGET" in
 esac
 
 if [ "$(id -u)" -ne 0 ]; then
-    echo "[ERROR] 本脚本需要 root 权限：请使用 wget -qO- URL | sudo sh" >&2
+    echo "本脚本需要 root 权限：请使用 wget -qO- URL | sudo sh" >&2
     exit 1
 fi
 if [ "$(uname -s)" != "Linux" ]; then
-    echo "[ERROR] 本脚本仅支持 Linux" >&2
+    echo "本脚本仅支持 Linux" >&2
     exit 1
 fi
 
@@ -31,8 +31,8 @@ if command -v curl >/dev/null 2>&1; then
 elif command -v wget >/dev/null 2>&1; then
     DOWNLOADER="wget"
 else
-    echo "[ERROR] 系统中既没有 curl，也没有 wget。" >&2
-    echo "[ERROR] Ubuntu/Debian 请先执行: sudo apt-get update && sudo apt-get install -y curl" >&2
+    echo "系统中既没有 curl，也没有 wget。" >&2
+    echo "Ubuntu/Debian 请先执行: sudo apt-get update && sudo apt-get install -y curl" >&2
     exit 1
 fi
 
@@ -81,52 +81,52 @@ lookup_passwd_record() {
 ACCOUNT_SELECTOR="root"
 ACCOUNT_KIND="name"
 if [ "${PKEXEC_UID+x}" = "x" ]; then
-    valid_uid "$PKEXEC_UID" || { echo "[ERROR] PKEXEC_UID 格式无效" >&2; exit 1; }
+    valid_uid "$PKEXEC_UID" || { echo "PKEXEC_UID 格式无效" >&2; exit 1; }
     ACCOUNT_SELECTOR="$PKEXEC_UID"
     ACCOUNT_KIND="uid"
 elif [ "${SUDO_USER+x}" = "x" ] && [ "$SUDO_USER" != "root" ]; then
-    valid_user_name "$SUDO_USER" || { echo "[ERROR] SUDO_USER 格式无效" >&2; exit 1; }
+    valid_user_name "$SUDO_USER" || { echo "SUDO_USER 格式无效" >&2; exit 1; }
     ACCOUNT_SELECTOR="$SUDO_USER"
 fi
 
 PASSWD_RECORD=$(lookup_passwd_record "$ACCOUNT_SELECTOR" "$ACCOUNT_KIND") || {
-    echo "[ERROR] 无法从系统账号数据库解析真实用户" >&2
+    echo "无法从系统账号数据库解析真实用户" >&2
     exit 1
 }
 [ "$(printf '%s\n' "$PASSWD_RECORD" | wc -l | tr -d '[:space:]')" = "1" ] \
     && [ "$(printf '%s\n' "$PASSWD_RECORD" | awk -F: '{ print NF }')" = "7" ] || {
-    echo "[ERROR] 系统账号记录格式无效" >&2
+    echo "系统账号记录格式无效" >&2
     exit 1
 }
 REAL_USER=$(printf '%s\n' "$PASSWD_RECORD" | cut -d: -f1)
 REAL_UID=$(printf '%s\n' "$PASSWD_RECORD" | cut -d: -f3)
 REAL_GID=$(printf '%s\n' "$PASSWD_RECORD" | cut -d: -f4)
 REAL_HOME=$(printf '%s\n' "$PASSWD_RECORD" | cut -d: -f6)
-valid_user_name "$REAL_USER" || { echo "[ERROR] 系统账号名称格式无效" >&2; exit 1; }
+valid_user_name "$REAL_USER" || { echo "系统账号名称格式无效" >&2; exit 1; }
 valid_uid "$REAL_UID" && valid_uid "$REAL_GID" || {
-    echo "[ERROR] 用户 UID/GID 格式无效" >&2
+    echo "用户 UID/GID 格式无效" >&2
     exit 1
 }
 if [ "$ACCOUNT_KIND" = "uid" ] && [ "$REAL_UID" -ne "$PKEXEC_UID" ]; then
-    echo "[ERROR] PKEXEC_UID 与系统账号记录不一致" >&2
+    echo "PKEXEC_UID 与系统账号记录不一致" >&2
     exit 1
 fi
 if [ "$ACCOUNT_KIND" = "name" ] && [ "$ACCOUNT_SELECTOR" != "root" ]; then
-    [ "$REAL_USER" = "$SUDO_USER" ] || { echo "[ERROR] SUDO_USER 与系统账号记录不一致" >&2; exit 1; }
+    [ "$REAL_USER" = "$SUDO_USER" ] || { echo "SUDO_USER 与系统账号记录不一致" >&2; exit 1; }
     if [ "${SUDO_UID+x}" = "x" ]; then
         valid_uid "$SUDO_UID" && [ "$REAL_UID" -eq "$SUDO_UID" ] || {
-            echo "[ERROR] SUDO_UID 与系统账号记录不一致" >&2
+            echo "SUDO_UID 与系统账号记录不一致" >&2
             exit 1
         }
     fi
 fi
 case "$REAL_HOME" in
     /*) ;;
-    *) echo "[ERROR] 用户目录必须是绝对路径" >&2; exit 1 ;;
+    *) echo "用户目录必须是绝对路径" >&2; exit 1 ;;
 esac
-[ "${#REAL_HOME}" -le 4096 ] || { echo "[ERROR] 用户目录路径过长" >&2; exit 1; }
+[ "${#REAL_HOME}" -le 4096 ] || { echo "用户目录路径过长" >&2; exit 1; }
 [ -d "$REAL_HOME" ] && [ ! -L "$REAL_HOME" ] || {
-    echo "[ERROR] 用户目录必须是现有普通目录" >&2
+    echo "用户目录必须是现有普通目录" >&2
     exit 1
 }
 CONFIG_PATH="$REAL_HOME/.claude.json"
@@ -139,7 +139,7 @@ run_as_real_user() {
     elif command -v runuser >/dev/null 2>&1; then
         runuser -u "$REAL_USER" -- "$@"
     else
-        echo "[ERROR] 缺少 setpriv/runuser，无法以普通用户权限读取现有配置" >&2
+        echo "缺少 setpriv/runuser，无法以普通用户权限读取现有配置" >&2
         return 126
     fi
 }
@@ -147,7 +147,7 @@ run_as_real_user() {
 case "$(uname -m)" in
     x86_64|amd64) arch="x64" ;;
     arm64|aarch64) arch="arm64" ;;
-    *) echo "[ERROR] 不支持的架构: $(uname -m)" >&2; exit 1 ;;
+    *) echo "不支持的架构: $(uname -m)" >&2; exit 1 ;;
 esac
 if [ -f /lib/libc.musl-x86_64.so.1 ] || [ -f /lib/libc.musl-aarch64.so.1 ] \
     || ldd /bin/ls 2>/dev/null | grep -q musl; then
@@ -190,7 +190,7 @@ cleanup() {
     if [ -n "$TMP_DIR" ] && [ -d "$TMP_DIR" ]; then
         case "$TMP_DIR" in
             /tmp/claude-installer.*) rm -rf -- "$TMP_DIR" ;;
-            *) echo "[WARN] 临时目录路径异常，已拒绝清理" >&2 ;;
+            *) echo "临时目录路径异常，已拒绝清理" >&2 ;;
         esac
     fi
 }
@@ -230,7 +230,7 @@ download_file() {
     _output="$2"
     _quiet="${3:-false}"
     _max_bytes="${4:-$MAX_BINARY_BYTES}"
-    safe_gcs_url "$_url" || { echo "[ERROR] 下载 URL 不在允许范围" >&2; return 1; }
+    safe_gcs_url "$_url" || { echo "下载 URL 不在允许范围" >&2; return 1; }
     printf '%s\n' "$_max_bytes" | grep -Eq '^[0-9]{1,10}$' || return 1
     [ "$_max_bytes" -gt 0 ] && [ "$_max_bytes" -le "$MAX_BINARY_BYTES" ] || return 1
     _file_blocks=$(((_max_bytes + 511) / 512))
@@ -244,7 +244,7 @@ download_file() {
                     --max-redirs 5 --max-filesize "$_max_bytes" --write-out '%{url_effective}' \
                     -o "$_output" "$_url"); then
                     safe_gcs_url "$_effective_url" && return 0
-                    echo "[ERROR] curl 最终下载地址不在允许范围" >&2
+                    echo "curl 最终下载地址不在允许范围" >&2
                 fi
             else
                 if _effective_url=$(curl -fL --proto '=https' --proto-redir '=https' --tlsv1.2 \
@@ -252,7 +252,7 @@ download_file() {
                     --max-redirs 5 --max-filesize "$_max_bytes" --progress-bar \
                     --write-out '%{url_effective}' -o "$_output" "$_url"); then
                     safe_gcs_url "$_effective_url" && return 0
-                    echo "[ERROR] curl 最终下载地址不在允许范围" >&2
+                    echo "curl 最终下载地址不在允许范围" >&2
                 fi
             fi
         else
@@ -276,7 +276,7 @@ download_file() {
                 fi
             fi
         fi
-        echo "[WARN] 下载失败（第 $_attempt/3 次）" >&2
+        echo "下载失败（第 $_attempt/3 次）" >&2
         _attempt=$((_attempt + 1))
     done
     rm -f -- "$_output"
@@ -413,7 +413,7 @@ _download_artifact_wget() {
 # 下载二进制或归档到文件；与 download_file 不同，本函数支持 npmmirror 的 302 跳转。
 download_artifact() {
     _da_url="$1"; _da_output="$2"; _da_max_bytes="$3"; _da_quiet="${4:-false}"
-    is_allowed_binary_url "$_da_url" || { echo "[ERROR] 下载地址不在允许范围" >&2; return 1; }
+    is_allowed_binary_url "$_da_url" || { echo "下载地址不在允许范围" >&2; return 1; }
     printf '%s\n' "$_da_max_bytes" | grep -Eq '^[0-9]{1,10}$' || return 1
     [ "$_da_max_bytes" -gt 0 ] && [ "$_da_max_bytes" -le "$MAX_BINARY_BYTES" ] || return 1
     _da_blocks=$(( (_da_max_bytes + 511) / 512 ))
@@ -458,7 +458,7 @@ download_artifact() {
                 return 0
             fi
         fi
-        echo "[WARN] 下载失败（第 $_da_attempt/3 次）" >&2
+        echo "下载失败（第 $_da_attempt/3 次）" >&2
         _da_attempt=$(( _da_attempt + 1 ))
     done
     rm -f -- "$_da_output"
@@ -468,18 +468,18 @@ download_artifact() {
 # 从 npmmirror .tgz 归档中提取固定成员 package/claude 到目标文件。
 extract_binary_from_archive() {
     _eb_archive="$1"; _eb_dest="$2"
-    command -v tar >/dev/null 2>&1 || { echo "[ERROR] 缺少 tar，无法解包镜像归档" >&2; return 1; }
+    command -v tar >/dev/null 2>&1 || { echo "缺少 tar，无法解包镜像归档" >&2; return 1; }
     _eb_dir=$(mktemp -d "$TMP_DIR/extract.XXXXXX")
     # 仅提取写死的成员 package/claude，成员名不含路径穿越字符。
     if ! tar -xzf "$_eb_archive" -C "$_eb_dir" package/claude 2>/dev/null; then
         rm -rf -- "$_eb_dir"
-        echo "[ERROR] 镜像归档解包失败" >&2
+        echo "镜像归档解包失败" >&2
         return 1
     fi
     _eb_inner="$_eb_dir/package/claude"
     if [ ! -f "$_eb_inner" ] || [ -L "$_eb_inner" ]; then
         rm -rf -- "$_eb_dir"
-        echo "[ERROR] 镜像归档中缺少二进制" >&2
+        echo "镜像归档中缺少二进制" >&2
         return 1
     fi
     mv -f -- "$_eb_inner" "$_eb_dest"
@@ -502,11 +502,11 @@ fetch_verified_binary() {
         else
             _fb_url="$_fb_npm"; _fb_label="npmmirror 国内镜像"
         fi
-        echo "[INFO] 尝试下载源：$_fb_label"
+        echo "尝试下载源：$_fb_label"
         rm -f -- "$_fb_dest"
         if [ "$_fb_kind" = "gcs" ]; then
             if ! download_file "$_fb_url" "$_fb_dest" false "$_fb_size"; then
-                echo "[WARN] 该源下载失败，尝试下一个来源" >&2
+                echo "该源下载失败，尝试下一个来源" >&2
                 continue
             fi
         else
@@ -517,7 +517,7 @@ fetch_verified_binary() {
                 && extract_binary_from_archive "$_fb_arch" "$_fb_dest"; then
                 rm -f -- "$_fb_arch"
             else
-                echo "[WARN] 镜像源下载或解包失败，尝试下一个来源" >&2
+                echo "镜像源下载或解包失败，尝试下一个来源" >&2
                 rm -f -- "$_fb_arch"; rm -f -- "$_fb_dest"
                 continue
             fi
@@ -525,16 +525,16 @@ fetch_verified_binary() {
 
         _fb_actual_size=$(wc -c < "$_fb_dest" | tr -d '[:space:]')
         if [ "$_fb_actual_size" -gt "$MAX_BINARY_BYTES" ]; then
-            echo "[ERROR] 二进制超过大小限制" >&2
+            echo "二进制超过大小限制" >&2
             rm -f -- "$_fb_dest"; continue
         fi
         if [ "$_fb_size" -gt 0 ] && [ "$_fb_actual_size" -ne "$_fb_size" ]; then
-            echo "[WARN] 文件大小校验失败（期望 $_fb_size，实际 $_fb_actual_size），尝试下一个来源" >&2
+            echo "文件大小校验失败（期望 $_fb_size，实际 $_fb_actual_size），尝试下一个来源" >&2
             rm -f -- "$_fb_dest"; continue
         fi
         _fb_magic=$(od -An -tx1 -N4 "$_fb_dest" 2>/dev/null | tr -d ' \n')
         if [ "$_fb_magic" != "7f454c46" ]; then
-            echo "[WARN] 下载内容不是有效 ELF 文件，尝试下一个来源" >&2
+            echo "下载内容不是有效 ELF 文件，尝试下一个来源" >&2
             rm -f -- "$_fb_dest"; continue
         fi
         if command -v sha256sum >/dev/null 2>&1; then
@@ -542,17 +542,17 @@ fetch_verified_binary() {
         elif command -v shasum >/dev/null 2>&1; then
             _fb_actual_sha=$(shasum -a 256 "$_fb_dest" | cut -d ' ' -f 1)
         else
-            echo "[ERROR] 缺少 sha256sum 或 shasum，无法验证安装包" >&2
+            echo "缺少 sha256sum 或 shasum，无法验证安装包" >&2
             return 1
         fi
         if [ "$_fb_actual_sha" != "$_fb_sha" ]; then
-            echo "[WARN] SHA256 校验失败，尝试下一个来源" >&2
+            echo "SHA256 校验失败，尝试下一个来源" >&2
             rm -f -- "$_fb_dest"; continue
         fi
-        echo "[OK] 文件大小、ELF 头和 SHA256 校验通过（来源：$_fb_label）"
+        echo "文件大小、ELF 头和 SHA256 校验通过（来源：$_fb_label）"
         return 0
     done
-    echo "[ERROR] 所有下载源均失败或校验未通过，未修改现有安装" >&2
+    echo "所有下载源均失败或校验未通过，未修改现有安装" >&2
     return 1
 }
 
@@ -562,7 +562,7 @@ checksum=""
 expected_size=0
 
 if [ "$TARGET" = "latest" ] || [ "$TARGET" = "stable" ]; then
-    echo "[INFO] 获取 Claude Code 最新版本…"
+    echo "获取 Claude Code 最新版本…"
     version=""
     if download_file "$GCS_BUCKET/latest" "$VERSION_FILE" true 128 \
         && [ "$(wc -c < "$VERSION_FILE" | tr -d ' ')" -le 128 ]; then
@@ -570,17 +570,17 @@ if [ "$TARGET" = "latest" ] || [ "$TARGET" = "stable" ]; then
     fi
     if ! printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9._-]{1,32})?$' \
         || [ "${#version}" -gt 64 ]; then
-        echo "[WARN] 无法访问官方版本服务，改用国内镜像固定版本 $PINNED_VERSION" >&2
+        echo "无法访问官方版本服务，改用国内镜像固定版本 $PINNED_VERSION" >&2
         version="$PINNED_VERSION"
         PINNED_MODE=true
     fi
 else
     version="$TARGET"
     printf '%s\n' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9._-]{1,32})?$' || {
-        echo "[ERROR] 版本号格式无效" >&2
+        echo "版本号格式无效" >&2
         exit 1
     }
-    [ "${#version}" -le 64 ] || { echo "[ERROR] 版本号过长" >&2; exit 1; }
+    [ "${#version}" -le 64 ] || { echo "版本号过长" >&2; exit 1; }
 fi
 
 # manifest 的下载与解析在 parse_manifest 定义之后进行，失败时回退固定版本。
@@ -617,7 +617,7 @@ PY
     [ "$(wc -l < "$META_FILE" | tr -d ' ')" -eq 2 ]
 }
 if [ "$PINNED_MODE" != "true" ]; then
-    echo "[INFO] 版本: $version，平台: $platform，下载器: $DOWNLOADER"
+    echo "版本: $version，平台: $platform，下载器: $DOWNLOADER"
     manifest_ok=false
     if download_file "$GCS_BUCKET/$version/manifest.json" "$MANIFEST_FILE" true 1048576 \
         && [ "$(wc -c < "$MANIFEST_FILE" | tr -d ' ')" -le 1048576 ] \
@@ -631,16 +631,16 @@ if [ "$PINNED_MODE" != "true" ]; then
         fi
     fi
     if [ "$manifest_ok" != "true" ]; then
-        echo "[WARN] 获取官方 manifest 失败，改用国内镜像固定版本 $PINNED_VERSION" >&2
+        echo "获取官方 manifest 失败，改用国内镜像固定版本 $PINNED_VERSION" >&2
         version="$PINNED_VERSION"
         PINNED_MODE=true
     fi
 fi
 
 if [ "$PINNED_MODE" = "true" ]; then
-    checksum=$(pinned_field sha256) || { echo "[ERROR] 当前平台没有可用的固定版本" >&2; exit 1; }
-    expected_size=$(pinned_field size) || { echo "[ERROR] 当前平台没有可用的固定版本" >&2; exit 1; }
-    echo "[INFO] 固定版本: $version，平台: $platform，下载器: $DOWNLOADER（官方源优先、失败切镜像，强制校验大小与 SHA256）"
+    checksum=$(pinned_field sha256) || { echo "当前平台没有可用的固定版本" >&2; exit 1; }
+    expected_size=$(pinned_field size) || { echo "当前平台没有可用的固定版本" >&2; exit 1; }
+    echo "固定版本: $version，平台: $platform，下载器: $DOWNLOADER（官方源优先、失败切镜像，强制校验大小与 SHA256）"
 fi
 
 BINARY_LIMIT="$MAX_BINARY_BYTES"
@@ -648,7 +648,7 @@ if [ "$expected_size" -ge 1 ]; then
     BINARY_LIMIT="$expected_size"
 fi
 
-echo "[INFO] 正在下载 Claude Code 二进制…"
+echo "正在下载 Claude Code 二进制…"
 # 官方 GCS 优先、npmmirror 国内镜像兜底；任一来源均强制大小、ELF 头与 SHA256 校验。
 fetch_verified_binary "$version" "$BINARY_LIMIT" "$checksum" "$BINARY_FILE" || exit 1
 
@@ -664,14 +664,14 @@ secure_system_directory() {
 
 for managed_dir in "$INSTALL_BASE" "$VERSIONS_DIR" "$BIN_DIR" "$STATE_DIR" "$CACHE_DIR"; do
     if [ -L "$managed_dir" ] || { [ -e "$managed_dir" ] && [ ! -d "$managed_dir" ]; }; then
-        echo "[ERROR] 安装路径必须是普通目录: $managed_dir" >&2
+        echo "安装路径必须是普通目录: $managed_dir" >&2
         exit 1
     fi
 done
 mkdir -p "$VERSIONS_DIR" "$BIN_DIR" "$STATE_DIR" "$CACHE_DIR"
 for managed_dir in "$INSTALL_BASE" "$VERSIONS_DIR" "$BIN_DIR" "$STATE_DIR" "$CACHE_DIR"; do
     [ -d "$managed_dir" ] && [ ! -L "$managed_dir" ] || {
-        echo "[ERROR] 安装目录创建后类型异常: $managed_dir" >&2
+        echo "安装目录创建后类型异常: $managed_dir" >&2
         exit 1
     }
     chown 0:0 -- "$managed_dir"
@@ -684,11 +684,11 @@ publish_symlink() {
     _link_path="$2"
     _link_parent=${_link_path%/*}
     secure_system_directory "$_link_parent" || {
-        echo "[ERROR] 链接父目录必须由 root 所有且不可被其他用户写入: $_link_parent" >&2
+        echo "链接父目录必须由 root 所有且不可被其他用户写入: $_link_parent" >&2
         return 1
     }
     if { [ -e "$_link_path" ] || [ -L "$_link_path" ]; } && [ ! -L "$_link_path" ]; then
-        echo "[ERROR] $_link_path 已存在且不是符号链接，已拒绝覆盖" >&2
+        echo "$_link_path 已存在且不是符号链接，已拒绝覆盖" >&2
         return 1
     fi
     STAGED_LINK_DIR=$(mktemp -d "$_link_parent/.claude-link.XXXXXX")
@@ -702,7 +702,7 @@ publish_symlink() {
 
 final_path="$VERSIONS_DIR/$version"
 if { [ -e "$final_path" ] || [ -L "$final_path" ]; } && { [ ! -f "$final_path" ] || [ -L "$final_path" ]; }; then
-    echo "[ERROR] 目标版本路径类型异常，已拒绝覆盖" >&2
+    echo "目标版本路径类型异常，已拒绝覆盖" >&2
     exit 1
 fi
 STAGED_BINARY=$(mktemp "$VERSIONS_DIR/.claude.new.XXXXXX")
@@ -719,7 +719,7 @@ publish_symlink "$LINK_PATH" "$GLOBAL_LINK"
 backup_config() {
     [ -f "$CONFIG_PATH" ] || return 0
     if [ -L "$STATE_DIR/backups" ] || { [ -e "$STATE_DIR/backups" ] && [ ! -d "$STATE_DIR/backups" ]; }; then
-        echo "[ERROR] 配置备份路径必须是普通目录" >&2
+        echo "配置备份路径必须是普通目录" >&2
         return 1
     fi
     mkdir -p "$STATE_DIR/backups"
@@ -729,21 +729,21 @@ backup_config() {
     run_as_real_user cat -- "$CONFIG_PATH" > "$_backup"
     chown 0:0 -- "$_backup"
     chmod 600 "$_backup"
-    echo "[INFO] 已备份原配置到 $_backup"
+    echo "已备份原配置到 $_backup"
 }
 
 write_config() {
     _first_start="$1"
     if { [ -e "$CONFIG_PATH" ] || [ -L "$CONFIG_PATH" ]; } \
         && { [ ! -f "$CONFIG_PATH" ] || [ -L "$CONFIG_PATH" ]; }; then
-        echo "[ERROR] $CONFIG_PATH 必须是普通文件且不能是符号链接" >&2
+        echo "$CONFIG_PATH 必须是普通文件且不能是符号链接" >&2
         return 1
     fi
     if [ -f "$CONFIG_PATH" ]; then
         _config_owner=$(stat -c '%u' -- "$CONFIG_PATH") || return 1
         _config_links=$(stat -c '%h' -- "$CONFIG_PATH") || return 1
         [ "$_config_owner" = "$REAL_UID" ] && [ "$_config_links" = "1" ] || {
-            echo "[ERROR] 现有配置的所有者或硬链接数异常，已拒绝覆盖" >&2
+            echo "现有配置的所有者或硬链接数异常，已拒绝覆盖" >&2
             return 1
         }
     fi
@@ -780,7 +780,7 @@ PY
     elif command -v jq >/dev/null 2>&1; then
         if [ -f "$CONFIG_PATH" ]; then
             run_as_real_user jq -e 'type == "object"' "$CONFIG_PATH" >/dev/null \
-                || { echo "[ERROR] 原配置不是有效 JSON 对象，已保留原文件" >&2; return 1; }
+                || { echo "原配置不是有效 JSON 对象，已保留原文件" >&2; return 1; }
             run_as_real_user jq --arg first "$_first_start" \
                 '. + {installMethod:"native",autoUpdates:false,autoUpdatesProtectedForNative:true,hasCompletedOnboarding:true} | .firstStartTime //= $first' \
                 "$CONFIG_PATH" > "$_temp"
@@ -790,7 +790,7 @@ PY
                 > "$_temp"
         fi
     elif [ -f "$CONFIG_PATH" ]; then
-        echo "[ERROR] 缺少 python3/jq，无法安全合并现有配置" >&2
+        echo "缺少 python3/jq，无法安全合并现有配置" >&2
         return 1
     else
         cat > "$_temp" <<JSON
@@ -813,7 +813,7 @@ JSON
     (
         cd -- "$CONFIG_STAGE_DIR"
         [ "$(stat -c '%d:%i' -- .)" = "$CONFIG_STAGE_ID" ] || {
-            echo "[ERROR] 配置暂存目录在发布前发生变化" >&2
+            echo "配置暂存目录在发布前发生变化" >&2
             exit 1
         }
         cp -- "$_temp" ./claude.json
