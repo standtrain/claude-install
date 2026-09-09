@@ -52,28 +52,45 @@ async function buildSources() {
   return sources;
 }
 
-function runMsi(dest) {
+function runMsi(dest, controller) {
+  if (controller) controller.checkCancel();
   return new Promise((resolve, reject) => {
     const proc = spawn(EXECUTABLES.msiexec, ['/i', dest, '/qn', '/norestart'], systemOptions());
-    proc.once('error', reject);
-    proc.once('exit', (code) => {
-      if (code === 0 || code === 3010) {
+    // 注册到取消控制器：取消时由控制器 taskkill /T /F 递归结束 msiexec。
+    if (controller) controller.registerChild(proc);
+    let settled = false;
+    const finish = (error, code) => {
+      if (settled) return;
+      settled = true;
+      if (controller) controller.clearChild();
+      if (controller && controller.cancelled) {
+        reject(new Error('用户已取消安装'));
+      } else if (error) {
+        reject(error);
+      } else if (code === 0 || code === 3010) {
         if (code === 3010) logger.warn('MSI 提示建议重启（3010）');
         resolve();
       } else {
         reject(new Error(`msiexec 退出码 ${code}`));
       }
-    });
+    };
+    proc.once('error', (error) => finish(error));
+    proc.once('exit', (code) => finish(null, code));
   });
 }
 
-async function install() {
+async function install(onProgress, controller) {
+  const signal = controller && controller.abortController ? controller.abortController.signal : undefined;
+  const throwIfCancelled = () => { if (controller) controller.checkCancel(); };
+
   logger.step('准备安装 CC Switch（Claude Code 供应商切换工具）');
+  throwIfCancelled();
   const sources = await buildSources();
   if (sources.length === 0) throw new Error('无可用且可校验的 CC Switch 下载源');
 
   logger.info('CC Switch 下载源测速…');
   const ranked = await speedTest(sources);
+  throwIfCancelled();
   ranked.forEach((source) => {
     logger.info(`  · ${source.id}  ${source.ok ? `${source.ms}ms` : `失败：${source.error}`}`);
   });
@@ -86,12 +103,14 @@ async function install() {
   try {
     let lastError = null;
     for (const source of usable) {
+      throwIfCancelled();
       try {
         logger.info(`开始下载 CC Switch（${source.name}）`);
         await download(source.url, dest, (progress) => {
           logger.progress('ccswitch', progress.percent,
             `${(progress.loaded / 1048576).toFixed(1)} / ${(progress.total / 1048576).toFixed(1)} MB`);
-        }, null, { maxBytes: MAX_MSI_BYTES, timeoutMs: 300000 });
+          if (typeof onProgress === 'function') onProgress(progress);
+        }, signal, { maxBytes: MAX_MSI_BYTES, timeoutMs: 300000 });
         assertPrivateFile(tempDir, dest);
 
         const size = fs.statSync(dest).size;
@@ -102,16 +121,20 @@ async function install() {
         selected = source;
         break;
       } catch (error) {
+        // 用户取消时立即停止，不再尝试下一个下载源。
+        if (controller && controller.cancelled) throw new Error('用户已取消安装');
         lastError = error;
         try { fs.unlinkSync(dest); } catch (_) {}
         logger.warn(`该源下载或校验失败：${error.message}，尝试下一个`);
       }
     }
+    throwIfCancelled();
     if (!selected) throw lastError || new Error('CC Switch 下载失败');
     logger.step(`静默安装 CC Switch ${selected.version}…`);
-    await runMsi(dest);
+    await runMsi(dest, controller);
     logger.ok('CC Switch 安装完成');
   } finally {
+    if (controller) controller.clearChild();
     cleanupTaskTempDir(tempDir, [dest]);
   }
 }

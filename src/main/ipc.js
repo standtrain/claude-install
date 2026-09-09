@@ -15,6 +15,7 @@ const INSTALL_OPTION_KEYS = ['installGit'];
 let installer = null;
 let installTask = null;
 let ccSwitchTask = null;
+let ccSwitchController = null;
 let ccSwitchInstalled = false;
 
 function normalizeVersionOutput(value) {
@@ -103,17 +104,27 @@ async function installCCSwitch() {
   if (ccSwitchTask) return ccSwitchTask;
   if (installTask) throw new Error('主安装任务正在运行，请等待其完成');
 
+  const { createInstallController } = require('./installer/controller');
   const ccswitch = require('./installer/ccswitch');
-  const currentTask = Promise.resolve().then(() => ccswitch.install()).then(() => {
-    ccSwitchInstalled = true;
-    return { ok: true, alreadyInstalled: false };
-  });
+  const controller = createInstallController();
+  ccSwitchController = controller;
+  const currentTask = Promise.resolve()
+    .then(() => ccswitch.install(undefined, controller))
+    .then(() => {
+      ccSwitchInstalled = true;
+      return { ok: true, alreadyInstalled: false, cancelled: false };
+    })
+    .catch((error) => {
+      if (controller.cancelled) return { ok: false, cancelled: true };
+      throw error;
+    });
   ccSwitchTask = currentTask;
 
   try {
     return await currentTask;
   } finally {
     if (ccSwitchTask === currentTask) ccSwitchTask = null;
+    if (ccSwitchController === controller) ccSwitchController = null;
   }
 }
 
@@ -146,9 +157,11 @@ function register(mainWindow) {
   // ── 安装控制 ──
   handle('installer:start', (opts) => startInstall(mainWindow, opts));
   handle('installer:cancel', () => {
-    if (!installer) return { ok: false };
-    installer.cancel();
-    return { ok: true };
+    // 同一时刻只可能有一个安装任务在跑；主安装与 CC Switch 任一活动都要能取消。
+    let acted = false;
+    if (installer) { installer.cancel(); acted = true; }
+    if (ccSwitchController) { ccSwitchController.cancel(); acted = true; }
+    return { ok: acted };
   });
 
   // ── 工具 ──

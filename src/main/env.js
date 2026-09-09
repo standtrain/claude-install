@@ -10,7 +10,7 @@ module.exports = {
   INSTALL_SCRIPT: {
     name: '安装包内置 Windows 脚本',
     relativePath: 'deploy/cc-custom.ps1',
-    sha256: '887beae15a3e63217e1c0f67d6722dbc9a10f0156c3ac96f44ca784ac160f784',
+    sha256: '03e854766cef88aa1877b85a9eadd61b9178d7ab0e9a04098323fe7500a2de04',
   },
   GIT_MIRRORS: [
     {

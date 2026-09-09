@@ -217,7 +217,7 @@ els.btnStart.addEventListener('click', async () => {
   }
 });
 els.btnCancel.addEventListener('click', () => {
-  if (!mainInstallBusy || els.btnCancel.disabled) return;
+  if ((!mainInstallBusy && !ccSwitchBusy) || els.btnCancel.disabled) return;
   api.cancel();
   els.btnCancel.disabled = true;
   els.btnCancel.textContent = '正在取消…';
@@ -229,17 +229,28 @@ async function runCCSwitchInstall() {
   ccSwitchBusy = true;
   els.btnCCSwitch.textContent = '安装中…';
   syncOperationButtons();
+  els.btnCancel.classList.remove('hidden');
+  els.btnCancel.disabled = false;
+  els.btnCancel.textContent = '取消';
   appendLog({ level: 'info', text: '开始安装 CC Switch…', ts: Date.now() });
   try {
-    await api.installCCSwitch();
-    ccSwitchInstalled = true;
-    els.btnCCSwitch.textContent = '已安装 CC Switch ✓';
-    appendLog({ level: 'ok', text: 'CC Switch 安装完成！从开始菜单启动。', ts: Date.now() });
+    const result = await api.installCCSwitch();
+    if (result && result.cancelled) {
+      appendLog({ level: 'warn', text: 'CC Switch 安装已取消。', ts: Date.now() });
+      els.btnCCSwitch.textContent = ccSwitchLabel;
+    } else {
+      ccSwitchInstalled = true;
+      els.btnCCSwitch.textContent = '已安装 CC Switch ✓';
+      appendLog({ level: 'ok', text: 'CC Switch 安装完成！从开始菜单启动。', ts: Date.now() });
+    }
   } catch (e) {
     appendLog({ level: 'err', text: 'CC Switch 安装失败：' + (e && e.message || e), ts: Date.now() });
     els.btnCCSwitch.textContent = ccSwitchLabel + '（重试）';
   } finally {
     ccSwitchBusy = false;
+    els.btnCancel.classList.add('hidden');
+    els.btnCancel.disabled = false;
+    els.btnCancel.textContent = '取消';
     syncOperationButtons();
   }
 }

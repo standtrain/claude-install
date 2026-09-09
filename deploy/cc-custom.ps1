@@ -738,7 +738,6 @@ function Try-CopyBundledBinary {
     Copy-Item -LiteralPath $full -Destination $Destination -Force
     [void](Assert-RegularSingleLinkFile -Path $Destination)
     Set-ExactFileAcl -Path $Destination -AllowUsersReadExecute $true
-    Write-Warning "[WARN] 所有网络下载源均失败，使用安装包内置离线版本 $PINNED_FALLBACK_VERSION"
     return $true
 }
 
@@ -753,14 +752,22 @@ function Install-PinnedFallback {
 
     $binaryPath = Join-Path $DOWNLOADS_DIR ".claude-$PINNED_FALLBACK_VERSION-$platform.$([Guid]::NewGuid().ToString('N')).part"
     try {
-        try {
-            Save-ClaudeBinaryWithSources -Version $PINNED_FALLBACK_VERSION -Platform $platform `
-                -ExpectedSize ([int64]$fallback.Size) -ExpectedSha ([string]$fallback.Sha256) `
-                -Destination $binaryPath
-        } catch {
-            # 官方源与国内镜像均失败（含低速中止）时，最后尝试安装包内置离线二进制。
-            Write-Warning "[WARN] 网络下载源均失败：$($_.Exception.Message)"
-            if (-not (Try-CopyBundledBinary -Destination $binaryPath)) { throw }
+        # 进入固定版本兜底意味着官方版本服务已不可达；内置副本与固定版本同版本、同哈希，
+        # 优先直接使用本地内置版本，避免在慢/断网络上空等下载。
+        if (Try-CopyBundledBinary -Destination $binaryPath) {
+            Write-Output "[INFO] 使用安装包内置离线版本 $PINNED_FALLBACK_VERSION（已通过大小与 SHA256 校验），跳过网络下载"
+        } else {
+            # 无内置副本（如 ARM64 或远程脚本）时才走网络：官方源优先、低速切镜像。
+            try {
+                Save-ClaudeBinaryWithSources -Version $PINNED_FALLBACK_VERSION -Platform $platform `
+                    -ExpectedSize ([int64]$fallback.Size) -ExpectedSha ([string]$fallback.Sha256) `
+                    -Destination $binaryPath
+            } catch {
+                # 官方源与国内镜像均失败（含低速中止）时，最后再尝试安装包内置离线二进制。
+                Write-Warning "[WARN] 网络下载源均失败：$($_.Exception.Message)"
+                if (-not (Try-CopyBundledBinary -Destination $binaryPath)) { throw }
+                Write-Warning "[WARN] 已改用安装包内置离线版本 $PINNED_FALLBACK_VERSION"
+            }
         }
 
         $finalPath = "$VERSIONS_DIR\$PINNED_FALLBACK_VERSION.exe"
