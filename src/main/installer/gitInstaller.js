@@ -21,8 +21,10 @@ async function install(onProgress, installer) {
     return { skipped: true };
   }
 
+  const signal = installer && installer.abortController ? installer.abortController.signal : undefined;
+  if (installer && installer.cancelled) throw new Error('用户已取消安装');
   logger.info('对 Git 下载源进行测速…');
-  const ranked = await speedTest(env.GIT_MIRRORS);
+  const ranked = await speedTest(env.GIT_MIRRORS, signal);
   ranked.forEach(r => logger.info(`  · ${r.name}  ${r.ok ? r.ms + 'ms' : '失败：' + r.error}`));
 
   const usable = ranked.filter(r => r.ok);
@@ -30,7 +32,6 @@ async function install(onProgress, installer) {
     throw new Error('所有 Git 镜像源均不可达');
   }
 
-  const signal = installer && installer.abortController ? installer.abortController.signal : undefined;
   const tempDir = createTaskTempDir('git');
   const dest = taskFile(tempDir, 'Git-Setup.exe');
   try {

@@ -61,7 +61,7 @@ function validTimeout(value, fallback) {
   return Number.isInteger(value) && value >= 1000 && value <= 300000 ? value : fallback;
 }
 
-function head(url, timeoutMs, redirects, startedAt) {
+function head(url, timeoutMs, redirects, startedAt, signal) {
   const timeout = validTimeout(timeoutMs, env.DOWNLOAD_TIMEOUT_MS);
   const redirectCount = redirects || 0;
   const start = startedAt || Date.now();
@@ -76,12 +76,34 @@ function head(url, timeoutMs, redirects, startedAt) {
     }
 
     let settled = false;
+    let currentRes = null;
     const finish = (error, result) => {
       if (settled) return;
       settled = true;
+      removeAbortListener();
       if (error) reject(error);
       else resolve(result);
     };
+    // 用户取消：立即销毁在途响应与请求，让测速快速中止而不是等超时。
+    const onAbort = () => {
+      try { if (currentRes) currentRes.destroy(); } catch (_) { /* 忽略 */ }
+      try { req.destroy(); } catch (_) { /* 忽略 */ }
+      finish(new Error('用户已取消下载'));
+    };
+    const removeAbortListener = () => {
+      if (signal && typeof signal.removeEventListener === 'function') {
+        try { signal.removeEventListener('abort', onAbort); } catch (_) { /* 忽略 */ }
+      }
+    };
+    if (signal) {
+      if (signal.aborted) {
+        reject(new Error('用户已取消下载'));
+        return;
+      }
+      if (typeof signal.addEventListener === 'function') {
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
+    }
 
     const req = clientFor(parsed).request(parsed, {
       method: 'GET',
@@ -90,6 +112,7 @@ function head(url, timeoutMs, redirects, startedAt) {
         'User-Agent': 'ClaudeCLIInstaller',
       },
     }, (res) => {
+      currentRes = res;
       if ([301, 302, 303, 307, 308].indexOf(res.statusCode) !== -1 && res.headers.location) {
         res.resume();
         if (redirectCount >= MAX_REDIRECTS) {
@@ -103,7 +126,7 @@ function head(url, timeoutMs, redirects, startedAt) {
           finish(error);
           return;
         }
-        head(next, timeout, redirectCount + 1, start).then(
+        head(next, timeout, redirectCount + 1, start, signal).then(
           (result) => finish(null, result),
           finish,
         );
@@ -133,19 +156,22 @@ function head(url, timeoutMs, redirects, startedAt) {
   });
 }
 
-async function speedTest(sources) {
+async function speedTest(sources, signal) {
   if (!Array.isArray(sources) || sources.length > 20) {
     throw new Error('下载源列表无效或数量超过限制');
   }
+  if (signal && signal.aborted) throw new Error('用户已取消下载');
 
   const results = await Promise.all(sources.map(async (source) => {
     if (!source || typeof source.id !== 'string' || source.id.length > 80 || !isAllowed(source.url)) {
       return Object.assign({}, source, { ok: false, ms: Infinity, error: '下载源格式无效' });
     }
     try {
-      const result = await head(source.url);
+      const result = await head(source.url, undefined, undefined, undefined, signal);
       return Object.assign({}, source, { ok: true, ms: result.ms, bytes: result.bytes });
     } catch (error) {
+      // 已取消时直接上抛，令 Promise.all 立刻失败，不再等待其余慢源。
+      if (signal && signal.aborted) throw new Error('用户已取消下载');
       return Object.assign({}, source, {
         ok: false,
         ms: Infinity,

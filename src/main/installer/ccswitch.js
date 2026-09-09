@@ -89,7 +89,7 @@ async function install(onProgress, controller) {
   if (sources.length === 0) throw new Error('无可用且可校验的 CC Switch 下载源');
 
   logger.info('CC Switch 下载源测速…');
-  const ranked = await speedTest(sources);
+  const ranked = await speedTest(sources, signal);
   throwIfCancelled();
   ranked.forEach((source) => {
     logger.info(`  · ${source.id}  ${source.ok ? `${source.ms}ms` : `失败：${source.error}`}`);
