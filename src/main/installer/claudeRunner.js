@@ -25,6 +25,29 @@ function scriptPath(metadata) {
   throw new Error('内置安装脚本不存在');
 }
 
+// 安装包内置的离线 claude.exe（网络全失败时的最终兜底）。
+// 该文件通过 electron-builder 的 extraResources 放在 asar 外，因为要把真实文件系统路径交给
+// PowerShell 子进程（Copy-Item 无法读取 app.asar 归档内部）。
+// 打包后位于 resources/deploy/claude.exe，开发态位于项目根 deploy/claude.exe。
+// 文件可选：不存在时返回 null，不影响正常联网安装。
+function bundledBinaryPath() {
+  const relativePath = path.join('deploy', 'claude.exe');
+  const appRoot = app.getAppPath();
+  // 打包后 appRoot 指向 resources/app.asar，上一级即 resources；extraResources 落点在其下 deploy/。
+  const candidates = app.isPackaged
+    ? [path.resolve(appRoot, '..', relativePath)]
+    : [path.resolve(appRoot, relativePath)];
+  const found = candidates.find((candidate) => {
+    try {
+      const stat = fs.statSync(candidate);
+      return stat.isFile() && !stat.isSymbolicLink();
+    } catch (_) {
+      return false;
+    }
+  });
+  return found || null;
+}
+
 function readVerifiedScript(metadata) {
   if (!/^[a-f0-9]{64}$/.test(metadata && metadata.sha256 || '')) {
     throw new Error('内置安装脚本缺少可信 SHA256');
@@ -98,12 +121,20 @@ function executeScript(content, installer) {
     '-Command', loader];
   logger.cmd('powershell -NoProfile -NonInteractive -Command <内置已校验脚本>');
 
+  // 传入内置离线 claude.exe 路径（若存在），作为所有网络下载源失败时的最终兜底。
+  const childEnv = windowsScriptEnvironment();
+  const bundledBinary = bundledBinaryPath();
+  if (bundledBinary) {
+    childEnv.CLAUDE_BUNDLED_BINARY = bundledBinary;
+    logger.info(`内置离线版本可用：${bundledBinary}`);
+  }
+
   return new Promise((resolve, reject) => {
     const proc = spawn(powershell, args, {
       cwd: systemRoot,
       windowsHide: true,
       shell: false,
-      env: windowsScriptEnvironment(),
+      env: childEnv,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     if (installer) installer.registerChild(proc);

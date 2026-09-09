@@ -9,6 +9,14 @@ files:
   - deploy/cc-custom.ps1
   - package.json
 asar: true
+# 内置离线 claude.exe 放在 asar 外（resources/deploy/），供网络全失败时作为最终兜底；
+# 需把与固定版本 pin 一致的 claude.exe 放入 deploy/（该文件被 .gitignore 忽略，不入库）。
+# 使用目录 + filter：文件缺失时构建仍可成功，仅缺少离线兜底能力。
+extraResources:
+  - from: deploy
+    to: deploy
+    filter:
+      - claude.exe
 compression: normal
 win:
   target:

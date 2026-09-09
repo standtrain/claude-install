@@ -155,7 +155,9 @@ npm run dist:rpm      # Linux：仅 rpm
 - 下载 URL 使用 HTTPS 白名单；发生重定向时会重新校验协议和目标主机。
 - 下载写入临时文件，并限制超时、响应大小和重定向次数；校验通过后才原子替换目标文件。
 - Windows Git 固定为当前已验证的 2.55.0.windows.3，并在官方、清华 TUNA、阿里系 npmmirror 与华为云镜像间自动测速。
-- Claude CLI 二进制优先从 npmmirror（阿里云）npm 平台子包镜像下载（国内大文件更快更稳），官方 GCS（`storage.googleapis.com`）作为兜底；版本号与 manifest 仍取自官方 GCS，官方版本服务不可达时改用脚本内置固定版本（v2.1.263，附带各平台文件大小与 SHA256）。镜像只承担传输，下载的二进制仍须匹配文件大小、ELF/文件头与 SHA256（npmmirror 平台包内二进制经离线核验与官方逐字节一致）。
+- Claude CLI 二进制按「官方 GCS（`storage.googleapis.com`）优先、npmmirror（阿里云）npm 平台子包镜像兜底」的顺序下载。Windows 采用分块 Range 请求并带看门狗：连接超时、无数据超时与滑动速度窗口（持续低速）都会在几十秒内中止当前源并自动切换到下一源，不会在慢源上长时间假死（首字节前的 CDN 冷启动有独立宽限，不误杀）。镜像只承担传输，下载的二进制仍须匹配文件大小、ELF/文件头与 SHA256（npmmirror 平台包内二进制经离线核验与官方逐字节一致）。
+- 版本号与 manifest 取自官方 GCS；官方版本服务不可达时改用脚本内置固定版本（v2.1.263，附带各平台文件大小与 SHA256）。
+- Windows 图形安装包额外内置一份与固定版本哈希一致的离线 `claude.exe`（放在 asar 外的 `resources/deploy/`），当官方源与镜像都失败时作为最终兜底；复制前仍强制大小与 SHA256 校验。该文件被 `.gitignore` 忽略、不入库，缺失时仅失去离线兜底、不影响联网安装；内置它会使安装包体积增大约 200MB。
 - Git、Claude CLI 和 CC Switch 安装包按已知文件大小与 SHA256 校验，Linux 二进制还会检查 ELF 文件头。
 - 图形安装器只执行安装包内置且 SHA256 固定的部署脚本，不从远程选择脚本源。
 - CC Switch 固定为经过离线审查的 v3.18.0 元数据，并在 GitHub、ghproxy.net、gh-proxy.com 与 ghfast.top 间回退；镜像只承担传输，文件仍须匹配固定大小和 SHA256。

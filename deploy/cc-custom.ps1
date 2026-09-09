@@ -423,70 +423,6 @@ function Get-RemoteText {
     }
 }
 
-function Save-RemoteFile {
-    param(
-        [Parameter(Mandatory = $true)][string]$Url,
-        [Parameter(Mandatory = $true)][string]$Destination,
-        [Parameter(Mandatory = $true)][int64]$ExpectedSize
-    )
-
-    Assert-DownloadUrl -Url $Url
-    if ($ExpectedSize -lt 1 -or $ExpectedSize -gt 1GB) {
-        throw "无效的预期下载大小"
-    }
-    $destinationDirectory = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($Destination))
-    Assert-SafeDirectory -Path $destinationDirectory
-    if ($null -ne (Get-Item -LiteralPath $Destination -Force -ErrorAction SilentlyContinue)) {
-        throw "下载临时文件已存在"
-    }
-
-    try {
-        $response = $null
-        $inputStream = $null
-        $outputStream = $null
-        try {
-            $response = Get-HttpsResponse -Url $Url -TimeoutMs 300000
-            if ($response.ContentLength -gt $ExpectedSize) {
-                throw "远程文件超过预期大小"
-            }
-            $inputStream = $response.GetResponseStream()
-            Assert-SafeDirectory -Path $destinationDirectory
-            $outputStream = New-Object System.IO.FileStream(
-                $Destination,
-                [System.IO.FileMode]::CreateNew,
-                [System.IO.FileAccess]::Write,
-                [System.IO.FileShare]::None
-            )
-            $buffer = New-Object byte[] 65536
-            [int64]$total = 0
-            while (($read = $inputStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
-                $total += $read
-                if ($total -gt $ExpectedSize) {
-                    throw "远程文件超过预期大小"
-                }
-                $outputStream.Write($buffer, 0, $read)
-            }
-            $outputStream.Flush($true)
-        }
-        finally {
-            if ($null -ne $outputStream) { $outputStream.Dispose() }
-            if ($null -ne $inputStream) { $inputStream.Dispose() }
-            if ($null -ne $response) { $response.Dispose() }
-        }
-
-        $actualSize = (Get-Item -LiteralPath $Destination -Force -ErrorAction Stop).Length
-        if ($actualSize -ne $ExpectedSize) {
-            throw "下载文件大小校验失败"
-        }
-        [void](Assert-RegularSingleLinkFile -Path $Destination)
-        Set-ExactFileAcl -Path $Destination -AllowUsersReadExecute $true
-    }
-    catch {
-        Remove-SafeTemporaryFile -Path $Destination
-        throw
-    }
-}
-
 function Get-NpmArchiveUrl {
     param(
         [Parameter(Mandatory = $true)][string]$Version,
@@ -496,56 +432,170 @@ function Get-NpmArchiveUrl {
     return "$NPM_MIRROR_BASE/@anthropic-ai/claude-code-$Platform/-/claude-code-$Platform-$Version.tgz"
 }
 
-function Save-RemoteArchive {
+# 解析大文件最终地址：用 Range 0-0 逐跳跟随 302（npmmirror 注册表跳到 CDN），每一跳都重新做白名单校验。
+# 不直接 GET 全量，避免只为拿最终 URL 就触发整文件传输。
+function Resolve-FinalDownloadUrl {
+    param([Parameter(Mandatory = $true)][string]$StartUrl)
+
+    $currentUrl = $StartUrl
+    for ($redirectCount = 0; $redirectCount -le 5; $redirectCount++) {
+        Assert-DownloadUrl -Url $currentUrl
+        $request = [System.Net.HttpWebRequest]::Create($currentUrl)
+        $request.Method = "GET"
+        $request.AllowAutoRedirect = $false
+        $request.Timeout = 15000
+        $request.ReadWriteTimeout = 15000
+        $request.AddRange(0, 0) | Out-Null
+
+        $response = $null
+        try {
+            $response = $request.GetResponse()
+            $statusCode = [int]$response.StatusCode
+            if ($statusCode -in @(301, 302, 303, 307, 308)) {
+                $location = $response.Headers[[System.Net.HttpResponseHeader]::Location]
+                $response.Close()
+                if ([string]::IsNullOrWhiteSpace($location) -or $location.Length -gt 2048) {
+                    throw "重定向地址无效"
+                }
+                $currentUrl = (New-Object System.Uri((New-Object System.Uri($currentUrl)), $location)).AbsoluteUri
+                continue
+            }
+            $response.Close()
+            return $currentUrl
+        }
+        finally {
+            if ($null -ne $response) { try { $response.Close() } catch { } }
+        }
+    }
+    throw "重定向次数超过上限"
+}
+
+# 分块 Range 下载 + 硬看门狗：
+#  - 8MB 一块，每块是独立请求；连接超时 15s，首块读超时 45s（容忍 CDN 回源冷启动），其余块 25s。
+#    完全停滞（无字节）时最多 25~45s 即抛错，由上层切换下载源，不再无限等待。
+#  - 首字节到达后启用滑动速度窗口：每 20s 必须收到至少 6MB（约 300KB/s），持续低速立即判慢切源。
+#  - 总时长 15 分钟封顶，并强制不超过 HardMaxBytes。
+# 官方裸二进制传 ExactSize 做精确大小校验；镜像归档（.tgz，体积更小）传 ExactSize=0，仅做上限与解包后校验。
+function Save-ChunkedFile {
     param(
         [Parameter(Mandatory = $true)][string]$Url,
         [Parameter(Mandatory = $true)][string]$Destination,
-        [Parameter(Mandatory = $true)][int64]$MaxBytes
+        [Parameter(Mandatory = $true)][int64]$HardMaxBytes,
+        [int64]$ExactSize = 0
     )
 
     Assert-DownloadUrl -Url $Url
     $destinationDirectory = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($Destination))
     Assert-SafeDirectory -Path $destinationDirectory
     if ($null -ne (Get-Item -LiteralPath $Destination -Force -ErrorAction SilentlyContinue)) {
-        throw "归档临时文件已存在"
+        throw "下载临时文件已存在"
     }
 
-    $response = $null
-    $inputStream = $null
+    $chunkSize = [int64]8 * 1024 * 1024
+    $connectMs = 15000
+    $firstChunkReadMs = 45000
+    $chunkReadMs = 25000
+    $speedWindowMs = 20000
+    $speedWindowBytes = [int64]6 * 1024 * 1024
+    $totalDeadlineMs = 900000
+
+    $finalUrl = Resolve-FinalDownloadUrl -StartUrl $Url
+    $watch = [System.Diagnostics.Stopwatch]::StartNew()
     $outputStream = $null
     try {
-        $response = Get-HttpsResponse -Url $Url -TimeoutMs 300000
-        if ($response.ContentLength -gt $MaxBytes) {
-            throw "镜像归档超过大小上限"
-        }
-        $inputStream = $response.GetResponseStream()
-        Assert-SafeDirectory -Path $destinationDirectory
         $outputStream = New-Object System.IO.FileStream(
             $Destination,
             [System.IO.FileMode]::CreateNew,
             [System.IO.FileAccess]::Write,
             [System.IO.FileShare]::None
         )
-        $buffer = New-Object byte[] 65536
+
         [int64]$total = 0
-        while (($read = $inputStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
-            $total += $read
-            if ($total -gt $MaxBytes) {
-                throw "镜像归档超过大小上限"
+        [int64]$start = 0
+        [bool]$firstChunk = $true
+        [bool]$firstByteSeen = $false
+        [int64]$windowAnchorMs = 0
+        [int64]$windowAnchorBytes = 0
+        $buffer = New-Object byte[] 65536
+        $done = $false
+
+        while (-not $done) {
+            [int64]$end = $start + $chunkSize - 1
+            $request = [System.Net.HttpWebRequest]::Create($finalUrl)
+            $request.Method = "GET"
+            $request.AllowAutoRedirect = $false
+            $request.Timeout = $connectMs
+            if ($firstChunk) { $request.ReadWriteTimeout = $firstChunkReadMs }
+            else { $request.ReadWriteTimeout = $chunkReadMs }
+            $request.AddRange($start, $end) | Out-Null
+
+            $response = $null
+            [int64]$thisChunk = 0
+            try {
+                $response = $request.GetResponse()
+                $statusCode = [int]$response.StatusCode
+                # 206=分块；200=服务器忽略 Range 返回全量，则读完这一响应即结束。
+                $fullEntity = ($statusCode -eq 200)
+                if ($statusCode -ne 206 -and -not $fullEntity) {
+                    throw "下载请求返回 HTTP $statusCode"
+                }
+                $inputStream = $response.GetResponseStream()
+                while (($read = $inputStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                    $outputStream.Write($buffer, 0, $read)
+                    $total += $read
+                    $thisChunk += $read
+                    if ($total -gt $HardMaxBytes) { throw "下载文件超过大小上限" }
+                    $elapsed = $watch.ElapsedMilliseconds
+                    if ($elapsed -gt $totalDeadlineMs) { throw "下载总时长超过上限" }
+
+                    if (-not $firstByteSeen) {
+                        # 首个字节之前（CDN 回源冷启动）不做低速判定，只靠首块读超时兜底。
+                        $firstByteSeen = $true
+                        $windowAnchorMs = $elapsed
+                        $windowAnchorBytes = $total
+                    }
+                    elseif ($elapsed - $windowAnchorMs -ge $speedWindowMs) {
+                        if (($total - $windowAnchorBytes) -lt $speedWindowBytes) {
+                            throw "下载速度持续过低，切换下载源"
+                        }
+                        $windowAnchorMs = $elapsed
+                        $windowAnchorBytes = $total
+                    }
+                }
             }
-            $outputStream.Write($buffer, 0, $read)
+            finally {
+                if ($null -ne $response) { try { $response.Close() } catch { } }
+            }
+
+            if ($thisChunk -le 0) { throw "下载未收到数据" }
+            if ($fullEntity) { $done = $true; break }
+            $start += $thisChunk
+            if ($thisChunk -lt $chunkSize) { $done = $true; break }
+            $firstChunk = $false
         }
+
         $outputStream.Flush($true)
     }
     catch {
+        if ($null -ne $outputStream) { try { $outputStream.Dispose() } catch { } }
         Remove-SafeTemporaryFile -Path $Destination
         throw
     }
     finally {
-        if ($null -ne $outputStream) { $outputStream.Dispose() }
-        if ($null -ne $inputStream) { $inputStream.Dispose() }
-        if ($null -ne $response) { $response.Dispose() }
+        if ($null -ne $outputStream) { try { $outputStream.Dispose() } catch { } }
     }
+
+    $actualSize = (Get-Item -LiteralPath $Destination -Force -ErrorAction Stop).Length
+    if ($actualSize -le 0) {
+        Remove-SafeTemporaryFile -Path $Destination
+        throw "下载内容为空"
+    }
+    if ($ExactSize -gt 0 -and $actualSize -ne $ExactSize) {
+        Remove-SafeTemporaryFile -Path $Destination
+        throw "下载文件大小校验失败"
+    }
+    [void](Assert-RegularSingleLinkFile -Path $Destination)
+    Set-ExactFileAcl -Path $Destination -AllowUsersReadExecute $true
 }
 
 function Save-NpmArchiveBinary {
@@ -562,8 +612,9 @@ function Save-NpmArchiveBinary {
     $archive = "$Destination.tgz"
     $extractDir = Join-Path $destinationDirectory (".npm-extract-" + [Guid]::NewGuid().ToString("N"))
     try {
-        # 归档为 gzip 压缩包，体积小于二进制；用二进制预期大小作为下载上限足够宽松。
-        Save-RemoteArchive -Url $Url -Destination $archive -MaxBytes $ExpectedSize
+        # 归档为 gzip 压缩包，体积小于二进制；用二进制预期大小作为下载上限，精确大小在解包后校验。
+        if (Test-Path -LiteralPath $archive) { Remove-SafeTemporaryFile -Path $archive }
+        Save-ChunkedFile -Url $Url -Destination $archive -HardMaxBytes $ExpectedSize
 
         # Windows 10 1803+ / Windows 11 自带 bsdtar（System32\tar.exe），支持解包 .tgz。
         $tarExe = Join-Path $env:SystemRoot "System32\tar.exe"
@@ -621,9 +672,9 @@ function Save-ClaudeBinaryWithSources {
         Name = 'npmmirror 国内镜像'
         Url  = (Get-NpmArchiveUrl -Version $Version -Platform $Platform)
     }
-    # 国内镜像优先：大文件在国内网络下更快更稳（镜像二进制与官方逐字节一致，且仍强制 SHA256 校验）；
-    # 官方 GCS 作为兜底，仅在镜像不可用时使用，避免国内直连 GCS 大文件限速卡死。
-    $sources = @($npmSource, $gcsSource)
+    # 官方源优先：先尝试官方 GCS。分块下载器对每个源做连接超时、无数据超时与持续低速判定，
+    # 官方源不可达或速度持续过低时会在几十秒内自动切换到 npmmirror 国内镜像（二进制逐字节一致、仍强制 SHA256）。
+    $sources = @($gcsSource, $npmSource)
 
     $lastError = $null
     foreach ($source in $sources) {
@@ -633,7 +684,7 @@ function Save-ClaudeBinaryWithSources {
                 Remove-SafeTemporaryFile -Path $Destination
             }
             if ($source.Kind -eq 'gcs') {
-                Save-RemoteFile -Url $source.Url -Destination $Destination -ExpectedSize $ExpectedSize
+                Save-ChunkedFile -Url $source.Url -Destination $Destination -HardMaxBytes $ExpectedSize -ExactSize $ExpectedSize
             } else {
                 Save-NpmArchiveBinary -Url $source.Url -Destination $Destination -ExpectedSize $ExpectedSize
             }
@@ -654,8 +705,45 @@ function Save-ClaudeBinaryWithSources {
     throw "所有下载源均失败：$lastError"
 }
 
+# 安装包内置离线二进制（最终兜底）：仅当图形安装器通过 CLAUDE_BUNDLED_BINARY 传入、
+# 且文件大小与 SHA256 与当前平台固定版本完全一致时才复制使用；任何不匹配一律拒绝。
+# 安全锚点是 SHA256：即使路径异常，内容哈希不符也不会安装。
+function Try-CopyBundledBinary {
+    param([Parameter(Mandatory = $true)][string]$Destination)
+
+    $bundled = [string]$env:CLAUDE_BUNDLED_BINARY
+    if ([string]::IsNullOrWhiteSpace($bundled) -or $bundled.Length -gt 32767) { return $false }
+    if ($bundled.IndexOfAny([char[]](0..31 + 127)) -ge 0) { return $false }
+
+    $full = $null
+    try {
+        $full = [System.IO.Path]::GetFullPath($bundled)
+        if (-not [System.IO.Path]::IsPathRooted($full)) { return $false }
+    } catch { return $false }
+
+    $fallback = $PINNED_FALLBACKS[$platform]
+    if ($null -eq $fallback) { return $false }
+
+    $item = Get-Item -LiteralPath $full -Force -ErrorAction SilentlyContinue
+    if ($null -eq $item -or -not ($item -is [System.IO.FileInfo]) `
+        -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+        return $false
+    }
+    if ($item.Length -ne [int64]$fallback.Size) { return $false }
+
+    $actual = Get-FileHashWithRetry -Path $full -Algorithm SHA256
+    if ($actual -cne ([string]$fallback.Sha256).ToLowerInvariant()) { return $false }
+
+    if (Test-Path -LiteralPath $Destination) { Remove-SafeTemporaryFile -Path $Destination }
+    Copy-Item -LiteralPath $full -Destination $Destination -Force
+    [void](Assert-RegularSingleLinkFile -Path $Destination)
+    Set-ExactFileAcl -Path $Destination -AllowUsersReadExecute $true
+    Write-Warning "[WARN] 所有网络下载源均失败，使用安装包内置离线版本 $PINNED_FALLBACK_VERSION"
+    return $true
+}
+
 function Install-PinnedFallback {
-    Write-Warning "[WARN] 最新版本不可用，回退到固定版本（国内镜像优先）"
+    Write-Warning "[WARN] 最新版本不可用，回退到固定版本（官方源优先，低速自动切镜像）"
     $fallback = $PINNED_FALLBACKS[$platform]
     if ($null -eq $fallback) {
         Write-Error "当前平台没有可用的固定版本"
@@ -665,9 +753,15 @@ function Install-PinnedFallback {
 
     $binaryPath = Join-Path $DOWNLOADS_DIR ".claude-$PINNED_FALLBACK_VERSION-$platform.$([Guid]::NewGuid().ToString('N')).part"
     try {
-        Save-ClaudeBinaryWithSources -Version $PINNED_FALLBACK_VERSION -Platform $platform `
-            -ExpectedSize ([int64]$fallback.Size) -ExpectedSha ([string]$fallback.Sha256) `
-            -Destination $binaryPath
+        try {
+            Save-ClaudeBinaryWithSources -Version $PINNED_FALLBACK_VERSION -Platform $platform `
+                -ExpectedSize ([int64]$fallback.Size) -ExpectedSha ([string]$fallback.Sha256) `
+                -Destination $binaryPath
+        } catch {
+            # 官方源与国内镜像均失败（含低速中止）时，最后尝试安装包内置离线二进制。
+            Write-Warning "[WARN] 网络下载源均失败：$($_.Exception.Message)"
+            if (-not (Try-CopyBundledBinary -Destination $binaryPath)) { throw }
+        }
 
         $finalPath = "$VERSIONS_DIR\$PINNED_FALLBACK_VERSION.exe"
         Publish-VerifiedBinary -SourcePath $binaryPath -DestinationPath $finalPath -ExpectedChecksum ([string]$fallback.Sha256)
@@ -1334,8 +1428,8 @@ if ($version) {
         try { Remove-SafeTemporaryFile -Path $binaryPath } catch { }
     }
 } else {
-    # ── GCS 不可达：使用固定版本，国内镜像优先下载并强制校验 ──
-    Write-Warning "[WARN] 无法获取官方版本号，使用固定版本（国内镜像优先）"
+    # ── GCS 版本服务不可达：使用固定版本，官方源优先、低速自动切镜像并强制校验 ──
+    Write-Warning "[WARN] 无法获取官方版本号，使用固定版本（官方源优先，低速自动切镜像）"
     Install-PinnedFallback
 }
 
