@@ -62,15 +62,15 @@ $ALLOWED_DOWNLOAD_HOSTS = @(
     "cdn.npmmirror.com"
 )
 # 固定兜底版本：官方版本服务（GCS）不可达时使用；大小与 SHA256 取自官方 manifest 的离线审查结果。
-$PINNED_FALLBACK_VERSION = "2.1.263"
+$PINNED_FALLBACK_VERSION = "2.1.291"
 $PINNED_FALLBACKS = @{
     "win32-x64" = @{
-        Size = [int64]218746016
-        Sha256 = "0b35df94c1307004f07b738390bfef8dfca5e9af29aaf6517f305bf086b95b03"
+        Size = [int64]253042848
+        Sha256 = "70052a17e06561a4563597f79570e81ccc0772474c3c6ac522aa5ccc71773013"
     }
     "win32-arm64" = @{
-        Size = [int64]209795744
-        Sha256 = "2ca14d6f61a39c3ad5d72424f4e347d5a570a58036ab1afe14c5e3eb668e9540"
+        Size = [int64]240567968
+        Sha256 = "fb1b35e6d1a91e45478cc6bd4e5ae7138dd00c3f79df339b7ab1fbbbbaf69bc0"
     }
 }
 

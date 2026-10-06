@@ -25,21 +25,21 @@
 推荐下载 `.AppImage.tar.gz` 归档（已保留可执行权限）：
 
 ```bash
-tar -xzf ClaudeCLIInstaller-Linux-0.3.5-x86_64.AppImage.tar.gz
-./ClaudeCLIInstaller-Linux-0.3.5-x86_64.AppImage
+tar -xzf ClaudeCLIInstaller-Linux-0.3.6-x86_64.AppImage.tar.gz
+./ClaudeCLIInstaller-Linux-0.3.6-x86_64.AppImage
 ```
 
 直接下载 `.AppImage` 时需要手动添加权限；不要使用 root 运行图形界面：
 
 ```bash
-chmod 755 ClaudeCLIInstaller-Linux-0.3.5-x86_64.AppImage
-./ClaudeCLIInstaller-Linux-0.3.5-x86_64.AppImage
+chmod 755 ClaudeCLIInstaller-Linux-0.3.6-x86_64.AppImage
+./ClaudeCLIInstaller-Linux-0.3.6-x86_64.AppImage
 ```
 
 若系统未安装 FUSE 2，可使用 AppImage 自带的解包运行模式：
 
 ```bash
-APPIMAGE_EXTRACT_AND_RUN=1 ./ClaudeCLIInstaller-Linux-0.3.5-x86_64.AppImage
+APPIMAGE_EXTRACT_AND_RUN=1 ./ClaudeCLIInstaller-Linux-0.3.6-x86_64.AppImage
 ```
 
 ------
@@ -156,7 +156,7 @@ npm run dist:rpm      # Linux：仅 rpm
 - 下载写入临时文件，并限制超时、响应大小和重定向次数；校验通过后才原子替换目标文件。
 - Windows Git 固定为当前已验证的 2.55.0.windows.3，并在官方、清华 TUNA、阿里系 npmmirror 与华为云镜像间自动测速。
 - Claude CLI 二进制按「官方 GCS（`storage.googleapis.com`）优先、npmmirror（阿里云）npm 平台子包镜像兜底」的顺序下载。Windows 采用分块 Range 请求并带看门狗：连接超时、无数据超时与滑动速度窗口（持续低速）都会在几十秒内中止当前源并自动切换到下一源，不会在慢源上长时间假死（首字节前的 CDN 冷启动有独立宽限，不误杀）。镜像只承担传输，下载的二进制仍须匹配文件大小、ELF/文件头与 SHA256（npmmirror 平台包内二进制经离线核验与官方逐字节一致）。
-- 版本号与 manifest 取自官方 GCS；官方版本服务不可达时改用脚本内置固定版本（v2.1.263，附带各平台文件大小与 SHA256）。
+- 版本号与 manifest 取自官方 GCS；官方版本服务不可达时改用脚本内置固定版本（v2.1.291，附带各平台文件大小与 SHA256）。
 - Windows 图形安装包额外内置一份与固定版本哈希一致的离线 `claude.exe`（放在 asar 外的 `resources/deploy/`）：一旦官方版本服务不可达、进入固定版本模式，会优先直接使用该本地副本（零网络等待、复制前强制大小与 SHA256 校验）；无内置副本（如 ARM64）时才走网络，官方源与镜像都失败时再回退到内置副本。该文件被 `.gitignore` 忽略、不入库，缺失时仅失去离线兜底、不影响联网安装；内置它会使安装包体积增大约 200MB。
 - CC Switch 安装与主安装共用同一取消机制：下载阶段通过中止信号中断，MSI 安装阶段通过递归结束 `msiexec` 中止，随时可点「取消」。
 - Git、Claude CLI 和 CC Switch 安装包按已知文件大小与 SHA256 校验，Linux 二进制还会检查 ELF 文件头。

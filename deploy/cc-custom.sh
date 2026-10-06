@@ -41,7 +41,7 @@ GCS_BUCKET="https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8
 # 镜像仅承担传输，下载内容仍须匹配官方大小、ELF 头与 SHA256，不放宽任何完整性校验。
 NPM_MIRROR_BASE="https://registry.npmmirror.com"
 # 固定兜底版本：官方版本服务（GCS）不可达时使用；大小与 SHA256 取自官方 manifest 的离线审查结果。
-PINNED_VERSION="2.1.263"
+PINNED_VERSION="2.1.291"
 INSTALL_BASE="/opt/claude"
 VERSIONS_DIR="$INSTALL_BASE/versions"
 BIN_DIR="$INSTALL_BASE/bin"
@@ -294,14 +294,14 @@ npm_archive_url() {
 # 固定版本的离线校验值（来源：官方 manifest），依据全局 $platform 查表。
 pinned_field() {
     case "$platform:$1" in
-        linux-x64:size) printf '%s\n' 215662064 ;;
-        linux-x64:sha256) printf '%s\n' 26d020351e8112f4006790f3cfce43b4c9df0c1bb1d0e542364d64151b81d5ba ;;
-        linux-arm64:size) printf '%s\n' 215211432 ;;
-        linux-arm64:sha256) printf '%s\n' 7d25d7c8ae6c6e009cc7dae4e817f674179fd31fb7761bcd56fee4c2902b4c03 ;;
-        linux-x64-musl:size) printf '%s\n' 209678288 ;;
-        linux-x64-musl:sha256) printf '%s\n' b9c407e36847bcb24b953b1390f240c840ae6c99e10a76475d2fadc5d5c4adca ;;
-        linux-arm64-musl:size) printf '%s\n' 208156312 ;;
-        linux-arm64-musl:sha256) printf '%s\n' 9b02e81a61d54bef3e6d190b6f2f6c4a9c31e6e068468f79d520d5ffff6b0e42 ;;
+        linux-x64:size) printf '%s\n' 249642168 ;;
+        linux-x64:sha256) printf '%s\n' 078fad28d0297c9a25d306b635b2d8816c6839347520f29eb54ffea5d56142fb ;;
+        linux-arm64:size) printf '%s\n' 249028600 ;;
+        linux-arm64:sha256) printf '%s\n' c18473a04cc4f077435d5d9081f09ebea46e699eb2825cea64741c4bccb87647 ;;
+        linux-x64-musl:size) printf '%s\n' 243388504 ;;
+        linux-x64-musl:sha256) printf '%s\n' e4b1fb39b56a6798063fa04912e838c01dd58dffeb238d6dcd31ad2d172e82c5 ;;
+        linux-arm64-musl:size) printf '%s\n' 241383232 ;;
+        linux-arm64-musl:sha256) printf '%s\n' 582811002a94033fb27f1a307ab893a32ebac827b4ea1b20f72eb778ccf834ab ;;
         *) return 1 ;;
     esac
 }
